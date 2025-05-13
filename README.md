@@ -4,7 +4,7 @@
 
 A control panel for under my desk that allows me to control my KVM as well as other peripherals.
 
-The main controller is an ESP32-C3.
+<!-- TODO: Should I use a central controller like an ESP32-C3? It increases complexity but it would allow more complex logic (time-based triggers) and a fancier status interface (OLED vs LEDs). -->
 
 ### Peripherals
 
@@ -25,11 +25,14 @@ When the INPUT is pulled to GND, the switch's output is the HDMI Input A.
 When the INPUT is pulled to 3.65V, the switch's output is the HDMI Input B.
 When the INPUT is floating, the switch's output seems to default to the HDMI Input B.
 
+The INPUT control pin can be driven by a simple toggle switch or an ESP32 digital output pin.
+
 #### USB Hub Switch
 
 The USB hub switch directs 4 USB ports between upstream computer A or upstream computer B.
 
 There are two control pins with a 4.75V potential difference. When these two control pins are bridged, the hub toggles the USB source.
+These pins can either be bridged with a MOSFET for triggering by an ESP32. Or we can use a simple momentary button switch.
 
 There are two LEDs with 1.9V potential difference to indicate which computer is being used as the source. These can be tapped into in order to get the current state.
 
@@ -46,7 +49,9 @@ Control USB power using MOSFETs. Planned USB-powered peripherals include:
 - Pyle PAD43MXUBT Audio Mixer (500mA @ 5V)
 - Arduino LED sign (200mA @ 5V)
 
-This should be accomplished with a P-Channel MOSFET or a USB power switch IC.
+The +5V lines of each port could simply be wired to toggle switches without an ESP32.
+
+To be triggered by an ESP32, this should be accomplished with a P-Channel MOSFET or a USB power switch IC.
 
 - USB switch IC: TPS2054
   - Available from DigiKey. Costs more but has more features.
@@ -58,4 +63,3 @@ This should be accomplished with a P-Channel MOSFET or a USB power switch IC.
 ### Important Points
 
 - Make sure to connect the grounds of all the peripherals.
-
