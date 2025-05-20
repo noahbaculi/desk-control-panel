@@ -25,9 +25,7 @@ When the INPUT is pulled to GND, the switch's output is the HDMI Input A.
 When the INPUT is pulled to 3.65V, the switch's output is the HDMI Input B.
 When the INPUT is floating, the switch's output seems to default to the HDMI Input B.
 
-The INPUT control pin will be driven by a simple latching switch and a pull-up resistor.
-
-<!-- TODO: What should the value of the pull-up resistor be? 4.7kΩ or 10kΩ? -->
+The INPUT control pin will be driven by a simple latching switch and a 10kΩ pull-up resistor.
 
 #### USB Hub Switch
 
