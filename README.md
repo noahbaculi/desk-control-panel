@@ -48,14 +48,14 @@ Control USB power using MOSFETs. Planned USB-powered peripherals include:
 - Pyle PAD43MXUBT Audio Mixer (500mA @ 5V)
 - Arduino LED sign (200mA @ 5V)
 
-To be triggered by an ESP32, this should be accomplished with a P-Channel MOSFET or a USB power switch IC.
-
-- USB switch IC: TPS2054
-  - Available from DigiKey. Costs more but has more features.
-- P-MOSFET: IRLML6402
-  - Widely available and cheaper but fewer features like short-circuit and thermal protection.
+To be triggered by an ESP32, this should be accomplished with a P-Channel MOSFET. The IRLML6402 is widely available and cheaper but without features like short-circuit and thermal protection of a dedicated USB Switch IC.
 
 > Using an N-Channel MOSFET is not ideal because the USB spec assumes GND is always connected and stable.
+
+Using the P-Channel MOSFET should include
+
+- A 1kΩ inline series gate resistor to reduce inrush current and EMI when switching the gate.
+- A 10kΩ pull-up resistor to ensure the MOSFET stays off during MCU boot/reset, while the GPIO is floating.
 
 ### Important Points
 
