@@ -13,6 +13,8 @@ A MCU like an ESP32 enables a fancier interface with a 0.96" OLED screen.
 - Speaker channels (left and right)
 - 3 x USB power
 
+> The HDMI switches and the USB hub switch are existing standalone devices so these will be controlled by buttons directly with the ESP32 monitoring for observability. The USB power switches will be controlled directly by the ESP32.
+
 #### HDMI Switch
 
 The 2 IN - 1 OUT HDMI switch has 3 control pins:
@@ -93,21 +95,6 @@ Using the P-Channel MOSFET should include
 - A 1kΩ inline series gate resistor to reduce inrush current and EMI when switching the gate. [Source](https://www.build-electronic-circuits.com/mosfet-gate-resistor/)
 - A 10kΩ pull-up resistor to ensure the MOSFET stays off during MCU boot/reset, while the GPIO is floating.
 
-### Important Points
+### Important Concepts
 
 - Make sure to connect the grounds of all the peripherals.
-
-### MCU Connections
-
-- SENSE A for HDMI Switch 1
-- SENSE B for HDMI Switch 1
-- SENSE A for HDMI Switch 2
-- SENSE B for HDMI Switch 2
-- SENSE A for USB Switch
-- SENSE B for USB Switch
-- CONTROL for USB Power 1
-- CONTROL for USB Power 2
-- CONTROL for USB Power 3
-- CONTROL for USB Power 4
-- GND for HDMI Switch 1
-- GND for HDMI Switch 2
