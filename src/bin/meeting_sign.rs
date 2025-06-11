@@ -7,7 +7,7 @@
 )]
 
 use defmt::info;
-use desk_control_panel::{AT_CMD, READ_BUF_SIZE};
+use desk_control_panel::{MeetingSignInstruction, AT_CMD, READ_BUF_SIZE};
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use esp_backtrace as _;
@@ -27,26 +27,35 @@ extern crate alloc;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[embassy_executor::task]
-async fn reader(mut rx: UartRx<'static, Async>, signal: &'static Signal<NoopRawMutex, usize>) {
+async fn reader(mut rx: UartRx<'static, Async>, _signal: &'static Signal<NoopRawMutex, usize>) {
     const MAX_BUFFER_SIZE: usize = 10 * READ_BUF_SIZE + 16;
 
     let mut rbuf: [u8; MAX_BUFFER_SIZE] = [0u8; MAX_BUFFER_SIZE];
     let mut offset = 0;
+
     loop {
-        let r = embedded_io_async::Read::read(&mut rx, &mut rbuf[offset..]).await;
-        match r {
-            Ok(len) => {
-                offset += len;
-                let data = &rbuf[..offset];
-                let data_str = match str::from_utf8(data) {
-                    Ok(v) => v,
-                    Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
-                };
-                esp_println::println!("Read: {len}, data: {:?}", data_str);
-                offset = 0;
-                signal.signal(len);
+        let len = embedded_io_async::Read::read(&mut rx, &mut rbuf[offset..offset + 1])
+            .await
+            .unwrap();
+        offset += len;
+
+        // Check for delimiter (\r\n)
+        if rbuf[offset - 1] == 0x00 {
+            let mut decode_buf = [0u8; 16];
+            // let decoded = cobs::decode(&rbuf[..offset - 1], &mut decode_buf).unwrap();
+            let instruction = postcard::from_bytes::<MeetingSignInstruction>(&decode_buf);
+
+            match instruction {
+                Ok(s) => esp_println::println!("Received: {:?}", s),
+                Err(e) => esp_println::println!("Deserialization error: {:?}", e),
             }
-            Err(e) => esp_println::println!("RX Error: {:?}", e),
+            offset = 0;
+        }
+
+        // Prevent buffer overflow
+        if offset >= MAX_BUFFER_SIZE - 1 {
+            esp_println::println!("Buffer overflow, resetting");
+            offset = 0;
         }
     }
 }

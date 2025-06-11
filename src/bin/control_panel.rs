@@ -7,9 +7,10 @@
 )]
 
 use defmt::info;
-use desk_control_panel::{AT_CMD, READ_BUF_SIZE};
+use desk_control_panel::{MeetingSignInstruction, AT_CMD, READ_BUF_SIZE};
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
+use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::{
     clock::CpuClock,
@@ -28,17 +29,35 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 #[embassy_executor::task]
 async fn writer(mut tx: UartTx<'static, Async>, _signal: &'static Signal<NoopRawMutex, usize>) {
-    use core::fmt::Write;
-    embedded_io_async::Write::write(
-        &mut tx,
-        b"Hello async serial. Enter something ended with EOT (CTRL-D).\r\n",
-    )
-    .await
-    .unwrap();
-    embedded_io_async::Write::flush(&mut tx).await.unwrap();
+    let payload = MeetingSignInstruction::Duration(180);
+    // let payload = MeetingSignInstruction::Diagnostic;
+
+    let mut buf = [0u8; 16];
+
     loop {
-        write!(&mut tx, "\r\n-- Hi There! --\r\n").unwrap();
+        // Serialize the payload fresh each time
+
+        let mut temp_buf = [0u8; 16];
+
+        let serialized = postcard::to_slice(&payload, &mut temp_buf).unwrap();
+        let encoded_len = cobs::encode(serialized, &mut buf);
+        let len = serialized.len();
+        esp_println::println!("Serialized length: {}", len);
+        esp_println::println!("Encoded length: {}", encoded_len);
+        esp_println::println!("Max encoded length: {}", cobs::max_encoding_length(len));
+
+        // Write the actual serialized data
+        tx.write_async(&buf[..encoded_len]).await.unwrap();
+        // tx.write_async(encoded).await.unwrap();
+
+        // Add delimiter to mark end of message
+        // tx.write_async(b"\r\n").await.unwrap();
+        tx.write_async(&[0x00]).await.unwrap(); // Null delimiter
+                                                //
         embedded_io_async::Write::flush(&mut tx).await.unwrap();
+
+        // Add delay to avoid flooding
+        Timer::after(Duration::from_millis(5000)).await;
     }
 }
 
