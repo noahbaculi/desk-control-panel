@@ -3,13 +3,22 @@ edition = "2021"
 name = "desk-control-panel"
 version = "0.1.0"
 
+[lib]
+test = false
+
+[[test]]
+name = "example_test"
+harness = false
+
 [[bin]]
 name = "control_panel"
 path = "src/bin/control_panel.rs"
+test = false
 
 [[bin]]
 name = "meeting_sign"
 path = "src/bin/meeting_sign.rs"
+test = false
 
 [dependencies]
 defmt = "1.0.1"
@@ -41,6 +50,16 @@ embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
 postcard = { version = "1.1.1", features = ["use-defmt"] }
 serde = { version = "1.0.219", default-features = false, features = ["derive"] }
 cobs = { version = "0.3.0", default-features = false, features = ["defmt"] }
+rtt-target = { version = "0.6.1", features = ["defmt"] }
+panic-rtt-target = { version = "0.2.0", features = ["defmt"] }
+
+[dev-dependencies]
+embedded-test = { version = "0.6.0", features = [
+  "defmt",
+  "embassy",
+  "external-executor",
+] }
+
 
 [profile.dev]
 # Rust debug is too slow.
