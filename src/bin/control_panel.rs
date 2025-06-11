@@ -8,9 +8,15 @@
 
 use defmt::info;
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
-use esp_hal::clock::CpuClock;
-use esp_hal::timer::systimer::SystemTimer;
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
+use esp_backtrace as _;
+use esp_hal::{
+    clock::CpuClock,
+    timer::systimer::SystemTimer,
+    uart::{AtCmdConfig, Config, RxConfig, Uart, UartRx, UartTx},
+    Async,
+};
+use static_cell::StaticCell;
 use {esp_backtrace as _, esp_println as _};
 
 extern crate alloc;
@@ -18,6 +24,54 @@ extern crate alloc;
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
+
+// fifo_full_threshold (RX)
+const READ_BUF_SIZE: usize = 64;
+// EOT (CTRL-D)
+const AT_CMD: u8 = 0x04;
+
+#[embassy_executor::task]
+async fn writer(mut tx: UartTx<'static, Async>, signal: &'static Signal<NoopRawMutex, usize>) {
+    use core::fmt::Write;
+    embedded_io_async::Write::write(
+        &mut tx,
+        b"Hello async serial. Enter something ended with EOT (CTRL-D).\r\n",
+    )
+    .await
+    .unwrap();
+    embedded_io_async::Write::flush(&mut tx).await.unwrap();
+    loop {
+        let bytes_read = signal.wait().await;
+        signal.reset();
+        write!(&mut tx, "\r\n-- received {} bytes --\r\n", bytes_read).unwrap();
+        embedded_io_async::Write::flush(&mut tx).await.unwrap();
+    }
+}
+
+#[embassy_executor::task]
+async fn reader(mut rx: UartRx<'static, Async>, signal: &'static Signal<NoopRawMutex, usize>) {
+    const MAX_BUFFER_SIZE: usize = 10 * READ_BUF_SIZE + 16;
+
+    let mut rbuf: [u8; MAX_BUFFER_SIZE] = [0u8; MAX_BUFFER_SIZE];
+    let mut offset = 0;
+    loop {
+        let r = embedded_io_async::Read::read(&mut rx, &mut rbuf[offset..]).await;
+        match r {
+            Ok(len) => {
+                offset += len;
+                let data = &rbuf[..offset];
+                let data_str = match str::from_utf8(data) {
+                    Ok(v) => v,
+                    Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+                };
+                esp_println::println!("Read: {len}, data: {:?}", data_str);
+                offset = 0;
+                signal.signal(len);
+            }
+            Err(e) => esp_println::println!("RX Error: {:?}", e),
+        }
+    }
+}
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
@@ -33,13 +87,23 @@ async fn main(spawner: Spawner) {
 
     info!("Embassy initialized!");
 
-    // TODO: Spawn some tasks
-    let _ = spawner;
+    let (tx_pin, rx_pin) = (peripherals.GPIO21, peripherals.GPIO20);
 
-    loop {
-        info!("Hello world!");
-        Timer::after(Duration::from_secs(1)).await;
-    }
+    let config = Config::default()
+        .with_rx(RxConfig::default().with_fifo_full_threshold(READ_BUF_SIZE as u16));
 
-    // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.0.0-beta.1/examples/src/bin
+    let mut uart0 = Uart::new(peripherals.UART0, config)
+        .unwrap()
+        .with_tx(tx_pin)
+        .with_rx(rx_pin)
+        .into_async();
+    uart0.set_at_cmd(AtCmdConfig::default().with_cmd_char(AT_CMD));
+
+    let (rx, tx) = uart0.split();
+
+    static SIGNAL: StaticCell<Signal<NoopRawMutex, usize>> = StaticCell::new();
+    let signal = &*SIGNAL.init(Signal::new());
+
+    spawner.spawn(reader(rx, signal)).ok();
+    spawner.spawn(writer(tx, signal)).ok();
 }
