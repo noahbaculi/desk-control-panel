@@ -98,3 +98,11 @@ Using the P-Channel MOSFET should include
 ### Important Concepts
 
 - Make sure to connect the grounds of all the peripherals.
+
+## Development
+
+### Commands
+
+```shell
+cargo run --release --bin control_panel
+```
