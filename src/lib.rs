@@ -13,3 +13,7 @@ pub enum MeetingSignInstruction {
     Off,
     Diagnostic,
 }
+
+pub const MAX_PAYLOAD_SIZE: usize = 2; // Max postcard serialized size
+pub const MAX_ENCODED_SIZE: usize = MAX_PAYLOAD_SIZE + (MAX_PAYLOAD_SIZE / 254) + 1;
+pub const RX_BUFFER_SIZE: usize = MAX_ENCODED_SIZE * 4; // Buffer multiple messages

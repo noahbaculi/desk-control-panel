@@ -7,7 +7,9 @@
 )]
 
 use defmt::info;
-use desk_control_panel::{MeetingSignInstruction, AT_CMD, READ_BUF_SIZE};
+use desk_control_panel::{
+    MeetingSignInstruction, AT_CMD, MAX_ENCODED_SIZE, MAX_PAYLOAD_SIZE, READ_BUF_SIZE,
+};
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::{Duration, Timer};
@@ -30,33 +32,32 @@ esp_bootloader_esp_idf::esp_app_desc!();
 #[embassy_executor::task]
 async fn writer(mut tx: UartTx<'static, Async>, _signal: &'static Signal<NoopRawMutex, usize>) {
     let payload = MeetingSignInstruction::Duration(180);
-    // let payload = MeetingSignInstruction::Diagnostic;
 
-    let mut buf = [0u8; 16];
+    // Buffers sized appropriately for COBS
+    let mut serialize_buf = [0u8; MAX_PAYLOAD_SIZE];
+    let mut encode_buf = [0u8; MAX_ENCODED_SIZE];
 
     loop {
-        // Serialize the payload fresh each time
+        // Serialize the payload
+        let serialized = postcard::to_slice(&payload, &mut serialize_buf).unwrap();
+        let serialized_len = serialized.len();
 
-        let mut temp_buf = [0u8; 16];
+        // COBS encode
+        let encoded_len = cobs::encode(serialized, &mut encode_buf);
 
-        let serialized = postcard::to_slice(&payload, &mut temp_buf).unwrap();
-        let encoded_len = cobs::encode(serialized, &mut buf);
-        let len = serialized.len();
-        esp_println::println!("Serialized length: {}", len);
-        esp_println::println!("Encoded length: {}", encoded_len);
-        esp_println::println!("Max encoded length: {}", cobs::max_encoding_length(len));
+        esp_println::println!(
+            "Serialized: {} bytes, Encoded: {} bytes",
+            serialized_len,
+            encoded_len
+        );
+        esp_println::println!("Raw data: {:?}", &serialized);
+        esp_println::println!("Encoded data: {:?}", &encode_buf[..encoded_len]);
 
-        // Write the actual serialized data
-        tx.write_async(&buf[..encoded_len]).await.unwrap();
-        // tx.write_async(encoded).await.unwrap();
-
-        // Add delimiter to mark end of message
-        // tx.write_async(b"\r\n").await.unwrap();
-        tx.write_async(&[0x00]).await.unwrap(); // Null delimiter
-                                                //
+        // Send encoded data + null delimiter
+        tx.write_async(&encode_buf[..encoded_len]).await.unwrap();
+        tx.write_async(&[0x00]).await.unwrap();
         embedded_io_async::Write::flush(&mut tx).await.unwrap();
 
-        // Add delay to avoid flooding
         Timer::after(Duration::from_millis(5000)).await;
     }
 }

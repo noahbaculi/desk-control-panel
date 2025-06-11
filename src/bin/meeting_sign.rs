@@ -7,7 +7,9 @@
 )]
 
 use defmt::info;
-use desk_control_panel::{MeetingSignInstruction, AT_CMD, READ_BUF_SIZE};
+use desk_control_panel::{
+    MeetingSignInstruction, AT_CMD, MAX_PAYLOAD_SIZE, READ_BUF_SIZE, RX_BUFFER_SIZE,
+};
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use esp_backtrace as _;
@@ -28,38 +30,54 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 #[embassy_executor::task]
 async fn reader(mut rx: UartRx<'static, Async>, _signal: &'static Signal<NoopRawMutex, usize>) {
-    const MAX_BUFFER_SIZE: usize = 10 * READ_BUF_SIZE + 16;
-
-    let mut rbuf: [u8; MAX_BUFFER_SIZE] = [0u8; MAX_BUFFER_SIZE];
+    let mut rbuf: [u8; RX_BUFFER_SIZE] = [0u8; RX_BUFFER_SIZE];
+    let mut decode_buf = [0u8; MAX_PAYLOAD_SIZE];
     let mut offset = 0;
 
     loop {
+        // Read one byte at a time
         let len = embedded_io_async::Read::read(&mut rx, &mut rbuf[offset..offset + 1])
             .await
             .unwrap();
         offset += len;
 
-        // Check for delimiter (\r\n)
+        // Check for null delimiter
         if rbuf[offset - 1] == 0x00 {
-            let mut decode_buf = [0u8; 16];
-            // let decoded = cobs::decode(&rbuf[..offset - 1], &mut decode_buf).unwrap();
-            let instruction = postcard::from_bytes::<MeetingSignInstruction>(&decode_buf);
+            let encoded_data = &rbuf[..offset - 1]; // Exclude delimiter
+            esp_println::println!("Received encoded data: {:?}", encoded_data);
 
-            match instruction {
-                Ok(s) => esp_println::println!("Received: {:?}", s),
-                Err(e) => esp_println::println!("Deserialization error: {:?}", e),
+            // COBS decode
+            match cobs::decode(encoded_data, &mut decode_buf) {
+                Ok(decoded_len) => {
+                    let decoded_data = &decode_buf[..decoded_len];
+                    esp_println::println!("Decoded data: {:?}", decoded_data);
+
+                    // Deserialize
+                    match postcard::from_bytes::<MeetingSignInstruction>(decoded_data) {
+                        Ok(instruction) => {
+                            esp_println::println!("✅ Received: {:?}", instruction);
+                        }
+                        Err(e) => {
+                            esp_println::println!("❌ Deserialization error: {:?}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    esp_println::println!("❌ COBS decode error: {:?}", e);
+                    esp_println::println!("Raw encoded data: {:?}", encoded_data);
+                }
             }
-            offset = 0;
+
+            offset = 0; // Reset for next message
         }
 
         // Prevent buffer overflow
-        if offset >= MAX_BUFFER_SIZE - 1 {
-            esp_println::println!("Buffer overflow, resetting");
+        if offset >= RX_BUFFER_SIZE - 1 {
+            esp_println::println!("⚠️  Buffer overflow, resetting");
             offset = 0;
         }
     }
 }
-
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
     // generator version: 0.4.0
