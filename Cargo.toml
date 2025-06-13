@@ -36,22 +36,26 @@ embassy-executor = { version = "0.7.0", features = [
 ] }
 embassy-time = { version = "0.4.0", features = ["defmt"] }
 esp-alloc = { version = "0.8.0", features = ["defmt"] }
-esp-backtrace = { version = "0.16.0", features = [
-  "defmt",
-  "esp32c3",
-  "exception-handler",
-  "panic-handler",
-] }
 esp-hal-embassy = { version = "0.8.1", features = ["defmt", "esp32c3"] }
-esp-println = { version = "0.14.0", features = ["defmt-espflash", "esp32c3"] }
 static_cell = { version = "2.1.0", features = ["nightly"] }
 embassy-sync = { version = "0.7.0", features = ["defmt"] }
 embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
 postcard = { version = "1.1.1", features = ["use-defmt"] }
 serde = { version = "1.0.219", default-features = false, features = ["derive"] }
 cobs = { version = "0.3.0", default-features = false, features = ["defmt"] }
-rtt-target = { version = "0.6.1", features = ["defmt"] }
 panic-rtt-target = { version = "0.2.0", features = ["defmt"] }
+rtt-target = { version = "0.6.1", features = ["defmt"] }
+esp-println = { version = "0.14.0", features = [
+  "esp32c3",
+  "defmt-espflash",
+  "log-04",
+] }
+log = "0.4.27"
+esp-backtrace = { version = "0.16.0", features = [
+  "esp32c3",
+  "panic-handler",
+  "defmt",
+] }
 
 [dev-dependencies]
 embedded-test = { version = "0.6.0", features = [

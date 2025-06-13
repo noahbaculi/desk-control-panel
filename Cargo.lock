@@ -282,6 +282,7 @@ dependencies = [
  "esp-hal",
  "esp-hal-embassy",
  "esp-println",
+ "log",
  "panic-rtt-target",
  "postcard",
  "rtt-target",

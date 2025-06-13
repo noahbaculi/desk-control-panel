@@ -103,6 +103,15 @@ Using the P-Channel MOSFET should include
 
 ### Commands
 
+Flash binaries
+
 ```shell
 cargo run --release --bin control_panel
+cargo run --release --bin meeting_sign
+```
+
+Run tests
+
+```shell
+cargo test --config .cargo/probe-rs.toml
 ```

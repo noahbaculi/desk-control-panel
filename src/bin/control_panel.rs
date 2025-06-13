@@ -13,15 +13,14 @@ use desk_control_panel::{
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::{Duration, Timer};
-use esp_backtrace as _;
+use esp_hal::clock::CpuClock;
+use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::{
-    clock::CpuClock,
-    timer::systimer::SystemTimer,
     uart::{AtCmdConfig, Config, RxConfig, Uart, UartTx},
     Async,
 };
+use panic_rtt_target as _;
 use static_cell::StaticCell;
-use {esp_backtrace as _, esp_println as _};
 
 extern crate alloc;
 
@@ -31,40 +30,43 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 #[embassy_executor::task]
 async fn writer(mut tx: UartTx<'static, Async>, _signal: &'static Signal<NoopRawMutex, usize>) {
-    let payload = MeetingSignInstruction::Duration(180);
-
     // Buffers sized appropriately for COBS
     let mut serialize_buf = [0u8; MAX_PAYLOAD_SIZE];
     let mut encode_buf = [0u8; MAX_ENCODED_SIZE];
 
     loop {
-        // Serialize the payload
-        let serialized = postcard::to_slice(&payload, &mut serialize_buf).unwrap();
-        let serialized_len = serialized.len();
+        for num_minutes in 1..=180 {
+            let payload = MeetingSignInstruction::Duration(num_minutes);
 
-        // COBS encode
-        let encoded_len = cobs::encode(serialized, &mut encode_buf);
+            // Serialize the payload
+            let serialized = postcard::to_slice(&payload, &mut serialize_buf).unwrap();
+            let serialized_len = serialized.len();
 
-        esp_println::println!(
-            "Serialized: {} bytes, Encoded: {} bytes",
-            serialized_len,
-            encoded_len
-        );
-        esp_println::println!("Raw data: {:?}", &serialized);
-        esp_println::println!("Encoded data: {:?}", &encode_buf[..encoded_len]);
+            // COBS encode
+            let encoded_len = cobs::encode(serialized, &mut encode_buf);
 
-        // Send encoded data + null delimiter
-        tx.write_async(&encode_buf[..encoded_len]).await.unwrap();
-        tx.write_async(&[0x00]).await.unwrap();
-        embedded_io_async::Write::flush(&mut tx).await.unwrap();
+            info!(
+                "Serialized: {} bytes, Encoded: {} bytes",
+                serialized_len, encoded_len
+            );
+            info!("Raw data: {:?}", &serialized);
+            info!("Encoded data: {:?}", &encode_buf[..encoded_len]);
 
-        Timer::after(Duration::from_millis(5000)).await;
+            // Send encoded data + null delimiter
+            tx.write_async(&encode_buf[..encoded_len]).await.unwrap();
+            tx.write_async(&[0x00]).await.unwrap();
+            embedded_io_async::Write::flush(&mut tx).await.unwrap();
+
+            Timer::after(Duration::from_millis(5000)).await;
+        }
     }
 }
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    // generator version: 0.4.0
+    rtt_target::rtt_init_defmt!();
+
+    info!("Hi there!");
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
@@ -76,7 +78,7 @@ async fn main(spawner: Spawner) {
 
     info!("Embassy initialized!");
 
-    let tx_pin = peripherals.GPIO20;
+    let tx_pin = peripherals.GPIO21;
 
     let config = Config::default()
         .with_rx(RxConfig::default().with_fifo_full_threshold(READ_BUF_SIZE as u16));
