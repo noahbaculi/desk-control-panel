@@ -10,18 +10,14 @@ use desk_control_panel::{
     MeetingSignInstruction, AT_CMD, MAX_PAYLOAD_SIZE, READ_BUF_SIZE, RX_BUFFER_SIZE,
 };
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
+use esp_backtrace as _;
 use esp_hal::{
     clock::CpuClock,
     timer::systimer::SystemTimer,
     uart::{AtCmdConfig, Config, RxConfig, Uart, UartRx},
     Async,
 };
-
-use defmt::info;
-// use panic_rtt_target as _;
-use esp_backtrace as _;
-// use log::info;
+use log::info;
 use log::LevelFilter;
 
 extern crate alloc;
@@ -39,10 +35,6 @@ async fn reader(mut rx: UartRx<'static, Async>) {
 
     loop {
         info!("Start loop");
-        // Read one byte at a time
-        // let len = embedded_io_async::Read::read(&mut rx, &mut rbuf[offset..offset + 1])
-        //     .await
-        //     .unwrap();
         match embedded_io_async::Read::read(&mut rx, &mut rbuf[offset..offset + 1]).await {
             Ok(len) => {
                 offset += len;
@@ -78,7 +70,6 @@ async fn reader(mut rx: UartRx<'static, Async>) {
                     info!("Raw encoded data: {:?}", encoded_data);
                 }
             }
-
             offset = 0; // Reset for next message
         }
 
@@ -87,15 +78,11 @@ async fn reader(mut rx: UartRx<'static, Async>) {
             info!("Buffer overflow, resetting");
             offset = 0;
         }
-
-        // Timer::after(Duration::from_millis(2000)).await;
     }
 }
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    // rtt_target::rtt_init_defmt!();
-    // rtt_target::rtt_init_print!();
     esp_println::logger::init_logger(LevelFilter::Info);
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
@@ -108,10 +95,9 @@ async fn main(spawner: Spawner) {
 
     info!("Embassy initialized!");
 
-    let rx_pin = peripherals.GPIO20;
+    let rx_pin = peripherals.GPIO21;
 
     let config = Config::default()
-        // .with_rx(RxConfig::default());
         .with_rx(RxConfig::default().with_fifo_full_threshold(READ_BUF_SIZE as u16));
 
     let mut uart0 = Uart::new(peripherals.UART0, config)

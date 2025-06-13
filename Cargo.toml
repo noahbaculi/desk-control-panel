@@ -28,7 +28,6 @@ esp-hal = { version = "=1.0.0-beta.1", features = [
   "esp32c3",
   "unstable",
 ] }
-
 critical-section = "1.2.0"
 embassy-executor = { version = "0.7.0", features = [
   "defmt",
@@ -56,6 +55,8 @@ esp-backtrace = { version = "0.16.0", features = [
   "panic-handler",
   "defmt",
 ] }
+# defmt-rtt = "1.0.0"
+defmt-rtt = "0.4"
 
 [dev-dependencies]
 embedded-test = { version = "0.6.0", features = [

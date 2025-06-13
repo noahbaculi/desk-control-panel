@@ -6,20 +6,21 @@
     holding buffers for the duration of a data transfer."
 )]
 
-use defmt::info;
 use desk_control_panel::{
     MeetingSignInstruction, AT_CMD, MAX_ENCODED_SIZE, MAX_PAYLOAD_SIZE, READ_BUF_SIZE,
 };
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::{Duration, Timer};
+use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::{
     uart::{AtCmdConfig, Config, RxConfig, Uart, UartTx},
     Async,
 };
-use panic_rtt_target as _;
+use log::info;
+use log::LevelFilter;
 use static_cell::StaticCell;
 
 extern crate alloc;
@@ -64,7 +65,7 @@ async fn writer(mut tx: UartTx<'static, Async>, _signal: &'static Signal<NoopRaw
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    rtt_target::rtt_init_defmt!();
+    esp_println::logger::init_logger(LevelFilter::Info);
 
     info!("Hi there!");
 
@@ -86,7 +87,6 @@ async fn main(spawner: Spawner) {
     let mut uart0 = Uart::new(peripherals.UART0, config)
         .unwrap()
         .with_tx(tx_pin)
-        // .with_rx(rx_pin)
         .into_async();
     uart0.set_at_cmd(AtCmdConfig::default().with_cmd_char(AT_CMD));
 
@@ -95,6 +95,5 @@ async fn main(spawner: Spawner) {
     static SIGNAL: StaticCell<Signal<NoopRawMutex, usize>> = StaticCell::new();
     let signal = &*SIGNAL.init(Signal::new());
 
-    // spawner.spawn(reader(rx, signal)).ok();
     spawner.spawn(writer(tx, signal)).ok();
 }
