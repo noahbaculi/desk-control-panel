@@ -6,9 +6,9 @@
     holding buffers for the duration of a data transfer."
 )]
 
-use desk_control_panel::{
-    MeetingSignInstruction, Minutes, QuarterSeconds, AT_CMD, MAX_ENCODED_SIZE, MAX_PAYLOAD_SIZE,
-    READ_BUF_SIZE,
+use desk_control_panel::meeting_duration::MeetingDuration;
+use desk_control_panel::meeting_instruction::{
+    MeetingSignInstruction, AT_CMD, MAX_ENCODED_SIZE, MAX_PAYLOAD_SIZE, READ_BUF_SIZE,
 };
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
@@ -39,9 +39,9 @@ async fn writer(mut tx: UartTx<'static, Async>, _signal: &'static Signal<NoopRaw
     loop {
         for num_minutes in 1..=180 {
             // let payload = MeetingSignInstruction::Duration(num_minutes);
-            let payload = MeetingSignInstruction::Duration(QuarterSeconds::from_minutes(Minutes(
-                num_minutes,
-            )));
+            let duration =
+                MeetingDuration::from_minutes(num_minutes).expect("Could not create duration");
+            let payload: MeetingSignInstruction = duration.into();
 
             // Serialize the payload
             let serialized = postcard::to_slice(&payload, &mut serialize_buf).unwrap();

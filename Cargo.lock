@@ -299,6 +299,7 @@ dependencies = [
  "rtt-target",
  "serde",
  "static_cell",
+ "thiserror",
 ]
 
 [[package]]

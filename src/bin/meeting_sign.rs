@@ -6,7 +6,7 @@
     holding buffers for the duration of a data transfer."
 )]
 
-use desk_control_panel::{
+use desk_control_panel::meeting_instruction::{
     MeetingSignInstruction, AT_CMD, MAX_PAYLOAD_SIZE, READ_BUF_SIZE, RX_BUFFER_SIZE,
 };
 use embassy_executor::Spawner;

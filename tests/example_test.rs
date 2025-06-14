@@ -4,8 +4,11 @@
 #[cfg(test)]
 #[embedded_test::tests(executor = esp_hal_embassy::Executor::new())]
 mod tests {
-    use defmt::assert_eq;
-    use desk_control_panel::{MeetingSignInstruction, Minutes, QuarterSeconds, MAX_PAYLOAD_SIZE};
+    use defmt::assert;
+    use desk_control_panel::{
+        meeting_duration::{MeetingDuration, MeetingDurationError},
+        meeting_instruction::{MeetingSignInstruction, MAX_PAYLOAD_SIZE},
+    };
     use esp_hal::timer::systimer::SystemTimer;
     use rtt_target::rtt_init_defmt;
 
@@ -20,7 +23,7 @@ mod tests {
     }
 
     #[test]
-    async fn test_serialize_all_variants() {
+    async fn test_serialize_all_variants() -> Result<(), MeetingDurationError> {
         defmt::info!("Testing serialization of all MeetingSignInstruction variants");
 
         let mut buf = [0u8; MAX_PAYLOAD_SIZE];
@@ -29,12 +32,11 @@ mod tests {
         for instruction in [
             MeetingSignInstruction::Off,
             MeetingSignInstruction::Diagnostic,
-            MeetingSignInstruction::Duration(QuarterSeconds::from_minutes(Minutes::MIN)),
-            MeetingSignInstruction::Duration(QuarterSeconds::from_minutes(Minutes(1))),
-            MeetingSignInstruction::Duration(QuarterSeconds::from_minutes(Minutes(5))),
-            MeetingSignInstruction::Duration(QuarterSeconds::from_minutes(Minutes(30))),
-            MeetingSignInstruction::Duration(QuarterSeconds::from_minutes(Minutes(60))),
-            MeetingSignInstruction::Duration(QuarterSeconds::from_minutes(Minutes::MAX)),
+            MeetingSignInstruction::from(MeetingDuration::from_minutes(1)?),
+            MeetingSignInstruction::from(MeetingDuration::from_minutes(5)?),
+            MeetingSignInstruction::from(MeetingDuration::from_minutes(30)?),
+            MeetingSignInstruction::from(MeetingDuration::from_minutes(60)?),
+            MeetingSignInstruction::from(MeetingDuration::MAX),
         ] {
             let result = postcard::to_slice(&instruction, &mut buf);
             assert!(
@@ -52,5 +54,7 @@ mod tests {
                 serialized_length
             );
         }
+
+        Ok(())
     }
 }
