@@ -7,7 +7,8 @@
 )]
 
 use desk_control_panel::{
-    MeetingSignInstruction, AT_CMD, MAX_ENCODED_SIZE, MAX_PAYLOAD_SIZE, READ_BUF_SIZE,
+    MeetingSignInstruction, Minutes, QuarterSeconds, AT_CMD, MAX_ENCODED_SIZE, MAX_PAYLOAD_SIZE,
+    READ_BUF_SIZE,
 };
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
@@ -37,7 +38,10 @@ async fn writer(mut tx: UartTx<'static, Async>, _signal: &'static Signal<NoopRaw
 
     loop {
         for num_minutes in 1..=180 {
-            let payload = MeetingSignInstruction::Duration(num_minutes);
+            // let payload = MeetingSignInstruction::Duration(num_minutes);
+            let payload = MeetingSignInstruction::Duration(QuarterSeconds::from_minutes(Minutes(
+                num_minutes,
+            )));
 
             // Serialize the payload
             let serialized = postcard::to_slice(&payload, &mut serialize_buf).unwrap();
