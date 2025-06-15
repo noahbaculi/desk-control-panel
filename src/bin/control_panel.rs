@@ -73,7 +73,6 @@ async fn main(spawner: Spawner) {
         peripherals.GPIO1,
         InputConfig::default().with_pull(Pull::Up),
     );
-    // let rotary_encoder = Rotary::new(rotary_encoder_clk, rotary_encoder_dt);
     spawner
         .spawn(monitor_rotary_encoder_rotation(
             rotary_encoder_clk,
@@ -88,7 +87,7 @@ async fn monitor_rotary_encoder_rotation(
     rotary_encoder_dt: Input<'static>,
 ) {
     debug!("Starting monitor_rotary_encoder_rotation task");
-    let mut rotary_encoder = Rotary::new(rotary_encoder_clk, rotary_encoder_dt);
+    let mut rotary_encoder = Rotary::new(rotary_encoder_dt, rotary_encoder_clk);
     let mut counter = 0;
     loop {
         let direction = rotary_encoder.update().unwrap();
@@ -104,7 +103,7 @@ async fn monitor_rotary_encoder_rotation(
             Direction::None => {}
         }
 
-        Timer::after(Duration::from_millis(1)).await;
+        Timer::after(Duration::from_millis(3)).await;
     }
 }
 
