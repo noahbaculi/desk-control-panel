@@ -4,10 +4,10 @@
 #[cfg(test)]
 #[embedded_test::tests(executor = esp_hal_embassy::Executor::new())]
 mod tests {
-    use defmt::assert;
+    use defmt::{assert, info};
     use desk_control_panel::{
         meeting_duration::{MeetingDuration, MeetingDurationError},
-        meeting_instruction::{MeetingSignInstruction, MAX_PAYLOAD_SIZE},
+        meeting_instruction::{MeetingSignInstruction, MAX_ENCODED_SIZE, MAX_PAYLOAD_SIZE},
     };
     use esp_hal::timer::systimer::SystemTimer;
     use rtt_target::rtt_init_defmt;
@@ -23,8 +23,8 @@ mod tests {
     }
 
     #[test]
-    async fn test_serialize_all_variants() -> Result<(), MeetingDurationError> {
-        defmt::info!("Testing serialization of all MeetingSignInstruction variants");
+    fn test_serialize_all_variants() -> Result<(), MeetingDurationError> {
+        info!("Testing serialization of all MeetingSignInstruction variants");
 
         let mut buf = [0u8; MAX_PAYLOAD_SIZE];
 
@@ -48,13 +48,39 @@ mod tests {
             let serialized_length = result.unwrap().len();
             assert!(serialized_length <= MAX_PAYLOAD_SIZE);
 
-            defmt::info!(
+            info!(
                 "Instruction {:?} serialized to {} bytes",
-                instruction,
-                serialized_length
+                instruction, serialized_length
             );
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_serialization() {
+        let mut serialize_buf = [0u8; MAX_PAYLOAD_SIZE];
+        let mut encode_buf = [0u8; MAX_ENCODED_SIZE];
+        let mut decode_buf = [0u8; MAX_PAYLOAD_SIZE];
+
+        // Test Duration instruction round-trip
+        let original_duration = MeetingDuration::from_minutes(45).unwrap();
+        let original_instruction = MeetingSignInstruction::from(original_duration);
+
+        // Serialize
+        let serialized = postcard::to_slice(&original_instruction, &mut serialize_buf).unwrap();
+
+        // COBS encode
+        let encoded_len = cobs::encode(serialized, &mut encode_buf);
+
+        // COBS decode
+        let decoded_len = cobs::decode(&encode_buf[..encoded_len], &mut decode_buf).unwrap();
+
+        // Deserialize
+        let decoded_instruction: MeetingSignInstruction =
+            postcard::from_bytes(&decode_buf[..decoded_len]).unwrap();
+
+        // Verify round-trip
+        assert_eq!(original_instruction, decoded_instruction);
     }
 }

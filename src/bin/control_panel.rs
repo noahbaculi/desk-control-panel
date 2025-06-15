@@ -65,7 +65,7 @@ async fn writer(mut uart: Uart<'static, Async>) {
             uart.write_async(&[0x00]).await.unwrap();
             embedded_io_async::Write::flush(&mut uart).await.unwrap();
 
-            Timer::after(Duration::from_millis(2000)).await;
+            Timer::after(Duration::from_millis(100)).await;
         }
     }
 }

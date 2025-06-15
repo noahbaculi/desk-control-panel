@@ -1,9 +1,8 @@
 #![allow(dead_code)]
 
+use crate::meeting_duration::MeetingDuration;
 use defmt::Format;
 use serde::{Deserialize, Serialize};
-
-use crate::meeting_duration::MeetingDuration;
 
 // fifo_full_threshold (RX)
 pub const READ_BUF_SIZE: usize = 64;
@@ -14,7 +13,7 @@ pub const AT_CMD: u8 = 0x04;
 ///
 /// This wrapper ensures durations are properly validated before being sent over UART.
 /// Cannot be constructed directly - must be created from a `MeetingDuration`.
-#[derive(Debug, Serialize, Deserialize, Format)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Format)]
 pub struct QuarterSeconds(u16);
 
 impl QuarterSeconds {
@@ -41,7 +40,7 @@ impl From<MeetingDuration> for QuarterSeconds {
 }
 
 /// Instructions sent to meeting sign.
-#[derive(Debug, Serialize, Deserialize, Format)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Format)]
 pub enum MeetingSignInstruction {
     Duration(QuarterSeconds),
     Off,

@@ -3,23 +3,6 @@ edition = "2021"
 name = "desk-control-panel"
 version = "0.1.0"
 
-[lib]
-test = false
-
-[[test]]
-name = "example_test"
-harness = false
-
-[[bin]]
-name = "control_panel"
-path = "src/bin/control_panel.rs"
-test = false
-
-[[bin]]
-name = "meeting_sign"
-path = "src/bin/meeting_sign.rs"
-test = false
-
 [dependencies]
 defmt = "1.0.1"
 esp-bootloader-esp-idf = "0.1.0"
@@ -55,7 +38,6 @@ esp-backtrace = { version = "0.16.0", features = [
   "panic-handler",
   "defmt",
 ] }
-# defmt-rtt = "1.0.0"
 defmt-rtt = "0.4"
 thiserror = { version = "2.0.12", default-features = false }
 
@@ -80,3 +62,25 @@ incremental = false
 lto = 'fat'
 opt-level = 's'
 overflow-checks = false
+
+
+# Embedded-test set up. See https://github.com/probe-rs/embedded-test/blob/master/examples/esp32c6/Cargo.toml
+[lib]
+test = false  # To make plain `cargo test` work: Disable tests for the bin, because we are only using the intergration tests
+bench = false # To make `cargo check --all-targets` work.
+
+[[test]]
+name = "meeting_instruction"
+harness = false              # Important: As we bring our own test harness, we need to disable the default one
+
+[[bin]]
+name = "control_panel"
+path = "src/bin/control_panel.rs"
+test = false                      # To make plain `cargo test` work: Disable tests for the bin, because we are only using the intergration tests
+bench = false                     # To make `cargo check --all-targets` work.
+
+[[bin]]
+name = "meeting_sign"
+path = "src/bin/meeting_sign.rs"
+test = false                     # To make plain `cargo test` work: Disable tests for the bin, because we are only using the intergration tests
+bench = false                    # To make `cargo check --all-targets` work.

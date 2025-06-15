@@ -28,7 +28,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 #[embassy_executor::task]
 async fn reader(mut uart: Uart<'static, Async>) {
     info!("Hi!");
-    let mut rbuf: [u8; RX_BUFFER_SIZE] = [0u8; RX_BUFFER_SIZE];
+    let mut rbuf = [0u8; RX_BUFFER_SIZE];
     let mut decode_buf = [0u8; MAX_PAYLOAD_SIZE];
     let mut offset = 0;
 
