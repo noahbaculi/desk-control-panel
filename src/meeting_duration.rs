@@ -18,18 +18,14 @@ pub enum MeetingDurationError {
 }
 
 impl MeetingDuration {
-    const MAX_NUM_SECS: u16 = 60 * 60 * 2; // 2 hours
+    const MAX_NUM_HOURS: u16 = 2;
+    const MAX_NUM_SECS: u16 = 60 * 60 * Self::MAX_NUM_HOURS;
     const MAX_DURATION: Duration = Duration::from_secs(Self::MAX_NUM_SECS as u64);
     pub const MAX: Self = Self(Self::MAX_DURATION);
 
     // Compile-time assertion to ensure MAX_DURATION fits in QuarterSeconds (u16)
     // Maximum MeetingDuration therefore has an upper bound of `u16::MAX / 60 / 60 / 4` = 4.55 hrs
     const _ASSERT_CONVERTS_TO_QUARTER_SECONDS: u16 = Self::MAX_NUM_SECS * 4; // seconds * 4 = quarter-seconds
-
-    /// Create with default duration
-    pub fn default() -> Self {
-        Self(Duration::from_secs(60 * 30)) // 30 minutes
-    }
 
     /// Get the wrapped Duration
     pub fn as_duration(&self) -> Duration {

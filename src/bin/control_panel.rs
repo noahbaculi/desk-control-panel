@@ -50,19 +50,24 @@ async fn writer(mut tx: UartTx<'static, Async>, _signal: &'static Signal<NoopRaw
             // COBS encode
             let encoded_len = cobs::encode(serialized, &mut encode_buf);
 
+            info!("{:?}", &duration);
             info!(
                 "Serialized: {} bytes, Encoded: {} bytes",
                 serialized_len, encoded_len
             );
-            info!("Raw data: {:?}", &serialized);
-            info!("Encoded data: {:?}", &encode_buf[..encoded_len]);
+            info!(
+                "{:?} | Raw data: {:?} | Encoded data: {:?}",
+                num_minutes,
+                &serialized,
+                &encode_buf[..encoded_len]
+            );
 
             // Send encoded data + null delimiter
             tx.write_async(&encode_buf[..encoded_len]).await.unwrap();
             tx.write_async(&[0x00]).await.unwrap();
             embedded_io_async::Write::flush(&mut tx).await.unwrap();
 
-            Timer::after(Duration::from_millis(5000)).await;
+            Timer::after(Duration::from_millis(2000)).await;
         }
     }
 }
