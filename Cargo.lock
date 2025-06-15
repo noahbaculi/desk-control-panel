@@ -283,6 +283,7 @@ dependencies = [
  "defmt 1.0.1",
  "defmt-rtt",
  "embassy-executor",
+ "embassy-futures",
  "embassy-sync 0.7.0",
  "embassy-time",
  "embedded-io-async",
@@ -296,6 +297,7 @@ dependencies = [
  "log",
  "panic-rtt-target",
  "postcard",
+ "rotary-encoder-hal",
  "rtt-target",
  "serde",
  "static_cell",
@@ -320,6 +322,12 @@ checksum = "95249b50c6c185bee49034bcb378a49dc2b5dff0be90ff6616d31d64febab05d"
 dependencies = [
  "litrs",
 ]
+
+[[package]]
+name = "either"
+version = "1.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
 name = "embassy-embedded-hal"
@@ -1284,6 +1292,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "rotary-encoder-hal"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a7862027e3cde9069e67d972bb07db0736c24f47abb1c2e3af5c4c37638d427"
+dependencies = [
+ "defmt 0.3.100",
+ "either",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]

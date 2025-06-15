@@ -11,6 +11,7 @@ use embassy_executor::Spawner;
 use esp_backtrace as _;
 use esp_hal::{
     clock::CpuClock,
+    gpio::{Input, InputConfig, Level, OutputConfig},
     timer::systimer::SystemTimer,
     uart::{Config, RxConfig, Uart},
     Async,
