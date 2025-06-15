@@ -23,64 +23,125 @@ mod tests {
     }
 
     #[test]
-    fn test_serialize_all_variants() -> Result<(), MeetingDurationError> {
-        info!("Testing serialization of all MeetingSignInstruction variants");
+    fn test_serialize_and_encoding_round_trip() -> Result<(), MeetingDurationError> {
+        info!(
+            "Testing serialization and encoding round-trip of all MeetingSignInstruction variants"
+        );
 
-        let mut buf = [0u8; MAX_PAYLOAD_SIZE];
+        let mut serialize_buf = [0u8; MAX_PAYLOAD_SIZE];
+        let mut encode_buf = [0u8; MAX_ENCODED_SIZE];
+        let mut decode_buf = [0u8; MAX_PAYLOAD_SIZE];
 
-        // Test Duration variant with different values
-        for instruction in [
+        // Test all instruction variants
+        let instructions = [
             MeetingSignInstruction::Off,
             MeetingSignInstruction::Diagnostic,
             MeetingSignInstruction::from(MeetingDuration::from_minutes(1)?),
             MeetingSignInstruction::from(MeetingDuration::from_minutes(5)?),
             MeetingSignInstruction::from(MeetingDuration::from_minutes(30)?),
             MeetingSignInstruction::from(MeetingDuration::from_minutes(60)?),
+            MeetingSignInstruction::from(MeetingDuration::from_minutes(120)?),
             MeetingSignInstruction::from(MeetingDuration::MAX),
-        ] {
-            let result = postcard::to_slice(&instruction, &mut buf);
+        ];
+
+        for (idx, orig_instruction) in instructions.iter().enumerate() {
+            info!("Testing instruction {}: {:?}", idx, orig_instruction);
+
+            // Step 1: Serialize
+            let serialized =
+                postcard::to_slice(orig_instruction, &mut serialize_buf).map_err(|e| {
+                    panic!(
+                        "Failed to serialize instruction {:?}: {}",
+                        orig_instruction, e
+                    )
+                })?;
+
+            let serialized_len = serialized.len();
             assert!(
-                result.is_ok(),
-                "Failed to serialize instruction {:?} - {}",
-                instruction,
-                result.unwrap_err()
+                serialized_len <= MAX_PAYLOAD_SIZE,
+                "Serialized size {} exceeds MAX_PAYLOAD_SIZE {} for instruction {:?}",
+                serialized_len,
+                MAX_PAYLOAD_SIZE,
+                orig_instruction
             );
-            let serialized_length = result.unwrap().len();
-            assert!(serialized_length <= MAX_PAYLOAD_SIZE);
+
+            info!("  Serialized to {} bytes: {:?}", serialized_len, serialized);
+
+            // Step 2: COBS encode
+            let encoded_len = cobs::encode(serialized, &mut encode_buf);
+            assert!(
+                encoded_len <= MAX_ENCODED_SIZE,
+                "Encoded size {} exceeds MAX_ENCODED_SIZE {} for instruction {:?}",
+                encoded_len,
+                MAX_ENCODED_SIZE,
+                orig_instruction
+            );
+
+            // Verify COBS encoding doesn't contain null bytes
+            let encoded_data = &encode_buf[..encoded_len];
+            for (byte_idx, &byte) in encoded_data.iter().enumerate() {
+                assert_ne!(
+                    byte, 0x00,
+                    "COBS encoding failed: null byte found at position {} for instruction {:?}",
+                    byte_idx, orig_instruction
+                );
+            }
 
             info!(
-                "Instruction {:?} serialized to {} bytes",
-                instruction, serialized_length
+                "  COBS encoded to {} bytes: {:?}",
+                encoded_len, encoded_data
             );
+
+            // Step 3: COBS decode
+            let decoded_len = cobs::decode(encoded_data, &mut decode_buf).map_err(|e| {
+                panic!(
+                    "Failed to COBS decode instruction {:?}: {:?}",
+                    orig_instruction, e
+                )
+            })?;
+
+            assert_eq!(
+                decoded_len, serialized_len,
+                "Decoded length {} doesn't match original serialized length {} for instruction {:?}",
+                decoded_len, serialized_len, orig_instruction
+            );
+
+            let decoded_data = &decode_buf[..decoded_len];
+            assert_eq!(
+                decoded_data, serialized,
+                "COBS decode didn't match original serialized data for instruction {:?}",
+                orig_instruction
+            );
+
+            info!(
+                "  COBS decoded to {} bytes: {:?}",
+                decoded_len, decoded_data
+            );
+
+            // Step 4: Deserialize
+            let deserialized_instruction: MeetingSignInstruction =
+                postcard::from_bytes(decoded_data).map_err(|e| {
+                    panic!(
+                        "Failed to deserialize instruction {:?}: {}",
+                        orig_instruction, e
+                    )
+                })?;
+
+            // Step 5: Verify round-trip
+            assert_eq!(
+                orig_instruction, &deserialized_instruction,
+                "Round-trip failed for instruction {:?}, got {:?}",
+                orig_instruction, deserialized_instruction
+            );
+
+            info!("  Round-trip successful: {:?}", deserialized_instruction);
+            info!("  ✓ Instruction {} passed all tests", idx);
         }
 
+        info!(
+            "All {} instruction variants passed serialization and round-trip tests",
+            instructions.len()
+        );
         Ok(())
-    }
-
-    #[test]
-    fn test_round_trip_serialization() {
-        let mut serialize_buf = [0u8; MAX_PAYLOAD_SIZE];
-        let mut encode_buf = [0u8; MAX_ENCODED_SIZE];
-        let mut decode_buf = [0u8; MAX_PAYLOAD_SIZE];
-
-        // Test Duration instruction round-trip
-        let original_duration = MeetingDuration::from_minutes(45).unwrap();
-        let original_instruction = MeetingSignInstruction::from(original_duration);
-
-        // Serialize
-        let serialized = postcard::to_slice(&original_instruction, &mut serialize_buf).unwrap();
-
-        // COBS encode
-        let encoded_len = cobs::encode(serialized, &mut encode_buf);
-
-        // COBS decode
-        let decoded_len = cobs::decode(&encode_buf[..encoded_len], &mut decode_buf).unwrap();
-
-        // Deserialize
-        let decoded_instruction: MeetingSignInstruction =
-            postcard::from_bytes(&decode_buf[..decoded_len]).unwrap();
-
-        // Verify round-trip
-        assert_eq!(original_instruction, decoded_instruction);
     }
 }

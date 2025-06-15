@@ -35,7 +35,7 @@ async fn writer(mut uart: Uart<'static, Async>) {
     let mut encode_buf = [0u8; MAX_ENCODED_SIZE];
 
     loop {
-        for num_minutes in 1..=180 {
+        for num_minutes in 1..=120 {
             let duration =
                 MeetingDuration::from_minutes(num_minutes).expect("Could not create duration");
             let payload: MeetingSignInstruction = duration.into();

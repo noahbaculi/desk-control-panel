@@ -7,7 +7,7 @@
 )]
 
 use desk_control_panel::meeting_instruction::{
-    MeetingSignInstruction, MAX_PAYLOAD_SIZE, READ_BUF_SIZE, RX_BUFFER_SIZE,
+    MeetingSignInstruction, MAX_ENCODED_SIZE, READ_BUF_SIZE, RX_BUFFER_SIZE,
 };
 use embassy_executor::Spawner;
 use esp_backtrace as _;
@@ -29,7 +29,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 async fn reader(mut uart: Uart<'static, Async>) {
     info!("Hi!");
     let mut rbuf = [0u8; RX_BUFFER_SIZE];
-    let mut decode_buf = [0u8; MAX_PAYLOAD_SIZE];
+    let mut decode_buf = [0u8; MAX_ENCODED_SIZE];
     let mut offset = 0;
 
     loop {
