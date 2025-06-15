@@ -7,9 +7,7 @@
 )]
 
 use desk_control_panel::meeting_duration::MeetingDuration;
-use desk_control_panel::meeting_instruction::{
-    MeetingSignInstruction, MAX_ENCODED_SIZE, MAX_PAYLOAD_SIZE, READ_BUF_SIZE,
-};
+use desk_control_panel::meeting_instruction::{self, MeetingSignInstruction};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
@@ -19,8 +17,8 @@ use esp_hal::{
     uart::{Config, RxConfig, Uart},
     Async,
 };
-use log::info;
 use log::LevelFilter;
+use log::{debug, info};
 
 extern crate alloc;
 
@@ -30,9 +28,11 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 #[embassy_executor::task]
 async fn writer(mut uart: Uart<'static, Async>) {
-    // Buffers sized appropriately for COBS
-    let mut serialize_buf = [0u8; MAX_PAYLOAD_SIZE];
-    let mut encode_buf = [0u8; MAX_ENCODED_SIZE];
+    debug!("Starting UART writer task");
+
+    // Buffers sized appropriately for the MeetingInstruction payload
+    let mut serialize_buf = [0u8; meeting_instruction::MAX_PAYLOAD_SIZE];
+    let mut encode_buf = [0u8; meeting_instruction::MAX_ENCODED_SIZE];
 
     loop {
         for num_minutes in 1..=120 {
@@ -47,12 +47,12 @@ async fn writer(mut uart: Uart<'static, Async>) {
             // COBS encode
             let encoded_len = cobs::encode(serialized, &mut encode_buf);
 
-            info!("{:?}", &duration);
-            info!(
+            debug!("{:?}", &duration);
+            debug!(
                 "Serialized: {} bytes, Encoded: {} bytes",
                 serialized_len, encoded_len
             );
-            info!(
+            debug!(
                 "Minutes: {:?} | Instruction: {:?} | Raw data: {:?} | Encoded data: {:?}",
                 num_minutes,
                 payload,
@@ -72,9 +72,7 @@ async fn writer(mut uart: Uart<'static, Async>) {
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    esp_println::logger::init_logger(LevelFilter::Info);
-
-    info!("Hi there!");
+    esp_println::logger::init_logger(LevelFilter::Debug);
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
@@ -88,8 +86,9 @@ async fn main(spawner: Spawner) {
 
     let tx_pin = peripherals.GPIO21;
 
-    let config = Config::default()
-        .with_rx(RxConfig::default().with_fifo_full_threshold(READ_BUF_SIZE as u16));
+    let config = Config::default().with_rx(
+        RxConfig::default().with_fifo_full_threshold(meeting_instruction::READ_BUF_SIZE as u16),
+    );
 
     let uart = Uart::new(peripherals.UART0, config)
         .unwrap()
