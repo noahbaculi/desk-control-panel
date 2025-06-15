@@ -7,18 +7,17 @@
 )]
 
 use desk_control_panel::meeting_instruction::{
-    MeetingSignInstruction, AT_CMD, MAX_PAYLOAD_SIZE, READ_BUF_SIZE, RX_BUFFER_SIZE,
+    MeetingSignInstruction, MAX_PAYLOAD_SIZE, READ_BUF_SIZE, RX_BUFFER_SIZE,
 };
 use embassy_executor::Spawner;
 use esp_backtrace as _;
 use esp_hal::{
     clock::CpuClock,
     timer::systimer::SystemTimer,
-    uart::{AtCmdConfig, Config, RxConfig, Uart, UartRx},
+    uart::{Config, RxConfig, Uart},
     Async,
 };
-use log::info;
-use log::LevelFilter;
+use log::{error, info, LevelFilter};
 
 extern crate alloc;
 
@@ -27,7 +26,7 @@ extern crate alloc;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[embassy_executor::task]
-async fn reader(mut rx: UartRx<'static, Async>) {
+async fn reader(mut uart: Uart<'static, Async>) {
     info!("Hi!");
     let mut rbuf: [u8; RX_BUFFER_SIZE] = [0u8; RX_BUFFER_SIZE];
     let mut decode_buf = [0u8; MAX_PAYLOAD_SIZE];
@@ -35,12 +34,12 @@ async fn reader(mut rx: UartRx<'static, Async>) {
 
     loop {
         info!("Start loop");
-        match embedded_io_async::Read::read(&mut rx, &mut rbuf[offset..offset + 1]).await {
+        match embedded_io_async::Read::read(&mut uart, &mut rbuf[offset..offset + 1]).await {
             Ok(len) => {
                 offset += len;
             }
             Err(e) => {
-                defmt::warn!("UART read error: {:?}", e);
+                error!("UART read error: {:?}", e);
             }
         }
 
@@ -100,13 +99,10 @@ async fn main(spawner: Spawner) {
     let config = Config::default()
         .with_rx(RxConfig::default().with_fifo_full_threshold(READ_BUF_SIZE as u16));
 
-    let mut uart0 = Uart::new(peripherals.UART0, config)
+    let uart = Uart::new(peripherals.UART0, config)
         .unwrap()
         .with_rx(rx_pin)
         .into_async();
-    uart0.set_at_cmd(AtCmdConfig::default().with_cmd_char(AT_CMD));
 
-    let (rx, _tx) = uart0.split();
-
-    spawner.spawn(reader(rx)).ok();
+    spawner.spawn(reader(uart)).ok();
 }
