@@ -3,49 +3,66 @@ edition = "2021"
 name = "desk-control-panel"
 version = "0.1.0"
 
+# Embedded-test set up. See https://github.com/probe-rs/embedded-test/blob/master/examples/esp32c6/Cargo.toml
+[lib]
+test = false  # To make plain `cargo test` work: Disable tests for the bin, because we are only using the intergration tests
+bench = false # To make `cargo check --all-targets` work.
+
+[[bin]]
+name = "control_panel"
+path = "src/bin/control_panel.rs"
+test = false                      # To make plain `cargo test` work: Disable tests for the bin, because we are only using the intergration tests
+bench = false                     # To make `cargo check --all-targets` work.
+
+[[bin]]
+name = "meeting_sign"
+path = "src/bin/meeting_sign.rs"
+test = false                     # To make plain `cargo test` work: Disable tests for the bin, because we are only using the intergration tests
+bench = false                    # To make `cargo check --all-targets` work.
+
 [dependencies]
-defmt = "1.0.1"
-esp-bootloader-esp-idf = "0.1.0"
-esp-hal = { version = "=1.0.0-beta.1", features = [
-  "defmt",
-  "esp32c3",
-  "unstable",
-] }
+cobs = { version = "0.3.0", default-features = false, features = ["defmt"] }
 critical-section = "1.2.0"
+defmt = "1.0.1"
+defmt-rtt = "0.4"
 embassy-executor = { version = "0.7.0", features = [
   "defmt",
   "task-arena-size-20480",
 ] }
-embassy-time = { version = "0.4.0", features = ["defmt"] }
-esp-alloc = { version = "0.8.0", features = ["defmt"] }
-esp-hal-embassy = { version = "0.8.1", features = ["defmt", "esp32c3"] }
-static_cell = { version = "2.1.0", features = ["nightly"] }
+embassy-futures = { version = "0.1.1", features = ["defmt"] }
 embassy-sync = { version = "0.7.0", features = ["defmt"] }
+embassy-time = { version = "0.4.0", features = ["defmt"] }
 embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
-postcard = { version = "1.1.1", features = ["use-defmt"] }
-serde = { version = "1.0.219", default-features = false, features = ["derive"] }
-cobs = { version = "0.3.0", default-features = false, features = ["defmt"] }
-panic-rtt-target = { version = "0.2.0", features = ["defmt"] }
-rtt-target = { version = "0.6.1", features = ["defmt"] }
-esp-println = { version = "0.14.0", features = [
-  "esp32c3",
-  "defmt-espflash",
-  "log-04",
-] }
-log = "0.4.27"
+esp-alloc = { version = "0.8.0", features = ["defmt"] }
 esp-backtrace = { version = "0.16.0", features = [
   "esp32c3",
   "panic-handler",
   "exception-handler",
   "println",
 ] }
-defmt-rtt = "0.4"
-thiserror = { version = "2.0.12", default-features = false }
+esp-bootloader-esp-idf = "0.1.0"
+esp-hal = { version = "=1.0.0-beta.1", features = [
+  "defmt",
+  "esp32c3",
+  "unstable",
+] }
+esp-hal-embassy = { version = "0.8.1", features = ["defmt", "esp32c3"] }
+esp-println = { version = "0.14.0", features = [
+  "esp32c3",
+  "defmt-espflash",
+  "log-04",
+] }
+log = "0.4.27"
+panic-rtt-target = { version = "0.2.0", features = ["defmt"] }
+postcard = { version = "1.1.1", features = ["use-defmt"] }
 rotary-encoder-hal = { version = "0.6.0", features = [
   "defmt",
   "table-decoder",
 ] }
-embassy-futures = { version = "0.1.1", features = ["defmt"] }
+rtt-target = { version = "0.6.1", features = ["defmt"] }
+serde = { version = "1.0.219", default-features = false, features = ["derive"] }
+static_cell = { version = "2.1.0", features = ["nightly"] }
+thiserror = { version = "2.0.12", default-features = false }
 
 [dev-dependencies]
 embedded-test = { version = "0.6.0", features = [
@@ -53,7 +70,6 @@ embedded-test = { version = "0.6.0", features = [
   "embassy",
   "external-executor",
 ] }
-
 
 [profile.dev]
 # Rust debug is too slow.
@@ -69,24 +85,6 @@ lto = 'fat'
 opt-level = 's'
 overflow-checks = false
 
-
-# Embedded-test set up. See https://github.com/probe-rs/embedded-test/blob/master/examples/esp32c6/Cargo.toml
-[lib]
-test = false  # To make plain `cargo test` work: Disable tests for the bin, because we are only using the intergration tests
-bench = false # To make `cargo check --all-targets` work.
-
 [[test]]
 name = "meeting_instruction"
 harness = false              # Important: As we bring our own test harness, we need to disable the default one
-
-[[bin]]
-name = "control_panel"
-path = "src/bin/control_panel.rs"
-test = false                      # To make plain `cargo test` work: Disable tests for the bin, because we are only using the intergration tests
-bench = false                     # To make `cargo check --all-targets` work.
-
-[[bin]]
-name = "meeting_sign"
-path = "src/bin/meeting_sign.rs"
-test = false                     # To make plain `cargo test` work: Disable tests for the bin, because we are only using the intergration tests
-bench = false                    # To make `cargo check --all-targets` work.
