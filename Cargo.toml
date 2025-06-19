@@ -11,13 +11,13 @@ bench = false # To make `cargo check --all-targets` work.
 [[bin]]
 name = "control_panel"
 path = "src/bin/control_panel.rs"
-test = false                      # To make plain `cargo test` work: Disable tests for the bin, because we are only using the intergration tests
+test = false                      # To make plain `cargo test` work: Disable tests for the bin, because we are only using the integration tests
 bench = false                     # To make `cargo check --all-targets` work.
 
 [[bin]]
 name = "meeting_sign"
 path = "src/bin/meeting_sign.rs"
-test = false                     # To make plain `cargo test` work: Disable tests for the bin, because we are only using the intergration tests
+test = false                     # To make plain `cargo test` work: Disable tests for the bin, because we are only using the integration tests
 bench = false                    # To make `cargo check --all-targets` work.
 
 [dependencies]

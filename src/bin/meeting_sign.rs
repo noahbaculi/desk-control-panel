@@ -8,16 +8,19 @@
 
 use desk_control_panel::meeting_instruction::{self, MeetingSignInstruction};
 use embassy_executor::Spawner;
+use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
 // use esp_backtrace as _;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use esp_hal::{
     clock::CpuClock,
-    gpio::{Input, InputConfig, Level, Output, OutputConfig},
+    gpio::{AnyPin, Input, InputConfig, Level, Output, OutputConfig},
     timer::systimer::SystemTimer,
     uart::{Config, RxConfig, Uart},
     Async,
 };
 use log::{debug, error, info, trace, warn, LevelFilter};
+use static_cell::StaticCell;
 
 extern crate alloc;
 
@@ -25,8 +28,95 @@ extern crate alloc;
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
+const NUM_LEDS: usize = 9;
+
 // Global static for the panic pin
 static mut PANIC_PIN: Option<Output<'static>> = None;
+
+type LEDsMutex = Mutex<CriticalSectionRawMutex, LEDs<'static>>;
+static LEDS: StaticCell<LEDsMutex> = StaticCell::new();
+
+struct LEDs<'a> {
+    led_outs: [Output<'a>; 9],
+}
+impl<'a> LEDs<'a> {
+    pub fn new(pins: [AnyPin<'a>; 9]) -> Self {
+        // Convert each pin to an Output
+        let led_outs = pins.map(|pin| Output::new(pin, Level::Low, OutputConfig::default()));
+
+        Self { led_outs }
+    }
+
+    pub fn toggle_all(&mut self) {
+        for led in &mut self.led_outs {
+            led.toggle();
+        }
+    }
+    // pub fn set_portion_high()
+}
+
+#[esp_hal_embassy::main]
+async fn main(spawner: Spawner) {
+    esp_println::logger::init_logger(LevelFilter::Debug);
+
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    let peripherals = esp_hal::init(config);
+
+    esp_alloc::heap_allocator!(size: 64 * 1024);
+
+    let timer0 = SystemTimer::new(peripherals.SYSTIMER);
+    esp_hal_embassy::init(timer0.alarm0);
+    info!("Embassy initialized!");
+
+    // WARN: This panic pin needs to match the emergency hardcoded panic pin
+    let panic_pin = Output::new(peripherals.GPIO3, Level::High, OutputConfig::default());
+    // Store the pin globally for panic handler access
+    unsafe {
+        PANIC_PIN = Some(panic_pin);
+    }
+
+    // WARN: These LED pins need to match the emergency hardcoded LED pins
+    let led_pins: [AnyPin; 9] = [
+        peripherals.GPIO5.into(),
+        peripherals.GPIO6.into(),
+        peripherals.GPIO7.into(),
+        peripherals.GPIO8.into(),
+        peripherals.GPIO9.into(),
+        peripherals.GPIO10.into(),
+        peripherals.GPIO20.into(),
+        peripherals.GPIO21.into(),
+        peripherals.GPIO0.into(),
+    ];
+    let leds = LEDS.init(Mutex::new(LEDs::new(led_pins)));
+    spawner.spawn(led_test_task(leds)).ok();
+
+    let rx_pin = peripherals.GPIO1;
+    let uart_config = Config::default().with_rx(
+        RxConfig::default().with_fifo_full_threshold(meeting_instruction::READ_BUF_SIZE as u16),
+    );
+    let uart = Uart::new(peripherals.UART0, uart_config)
+        .unwrap()
+        .with_rx(rx_pin)
+        .into_async();
+
+    spawner.spawn(uart_reader(uart)).ok();
+
+    Timer::after(Duration::from_secs(5)).await;
+    panic!("Ahhhh");
+}
+
+#[embassy_executor::task]
+async fn led_test_task(leds: &'static LEDsMutex) {
+    let mut counter = 0u16;
+    loop {
+        {
+            let mut leds = leds.lock().await;
+            leds.toggle_all();
+        }
+        counter = counter.wrapping_add(1);
+        Timer::after(Duration::from_millis(500)).await;
+    }
+}
 
 #[embassy_executor::task]
 async fn uart_reader(mut uart: Uart<'static, Async>) {
@@ -78,45 +168,8 @@ async fn uart_reader(mut uart: Uart<'static, Async>) {
     }
 }
 
-#[esp_hal_embassy::main]
-async fn main(spawner: Spawner) {
-    esp_println::logger::init_logger(LevelFilter::Debug);
-
-    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
-    let peripherals = esp_hal::init(config);
-
-    esp_alloc::heap_allocator!(size: 64 * 1024);
-
-    let timer0 = SystemTimer::new(peripherals.SYSTIMER);
-    esp_hal_embassy::init(timer0.alarm0);
-
-    info!("Embassy initialized!");
-    let rx_pin = peripherals.GPIO1;
-
-    let config = Config::default().with_rx(
-        RxConfig::default().with_fifo_full_threshold(meeting_instruction::READ_BUF_SIZE as u16),
-    );
-
-    let uart = Uart::new(peripherals.UART0, config)
-        .unwrap()
-        .with_rx(rx_pin)
-        .into_async();
-
-    spawner.spawn(uart_reader(uart)).ok();
-
-    // WARN: This panic pin needs to match the emergency hardcoded panic pin
-    let panic_pin = Output::new(peripherals.GPIO3, Level::High, OutputConfig::default());
-    // Store the pin globally for panic handler access
-    unsafe {
-        PANIC_PIN = Some(panic_pin);
-    }
-
-    Timer::after(Duration::from_secs(5)).await;
-    panic!("Ahhhh");
-}
-
 #[panic_handler]
-fn panic_handler(_info: &core::panic::PanicInfo) -> ! {
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     // Disable interrupts to prevent further issues
     critical_section::with(|_| {
         // Try to set the panic pin high
@@ -128,10 +181,12 @@ fn panic_handler(_info: &core::panic::PanicInfo) -> ! {
                 // This is a last resort and uses unsafe register access
                 emergency_gpio3_low();
             }
+
+            set_leds_panic_pattern();
         }
     });
 
-    error!("Panic occurred: {:?}", _info);
+    error!("Panic occurred: {:?}", info);
 
     // Halt the system
     loop {
@@ -160,9 +215,34 @@ unsafe fn emergency_gpio3_low() {
     core::ptr::write_volatile(GPIO_OUT_REG, out_val & !(1 << GPIO_PIN_NUMBER));
 }
 
-// Function you can call manually in error conditions
-pub fn trigger_panic_signal() {
-    unsafe {
-        emergency_gpio3_low();
+/// Panic function to set panic pattern on LEDs via GPIO pins
+unsafe fn set_leds_panic_pattern() {
+    // ESP32-C3 GPIO register addresses (from ESP32-C3 TRM Table 3.3-3 and Section 5.14.1)
+    // GPIO base address: 0x60004000, offsets from Section 5.14.1:
+    // https://www.espressif.com/sites/default/files/documentation/esp32-c3_technical_reference_manual_en.pdf
+
+    const GPIO_BASE: u32 = 0x60004000;
+    const GPIO_OUT_REG: *mut u32 = (GPIO_BASE + 0x0004) as *mut u32; // GPIO output register
+    const GPIO_ENABLE_REG: *mut u32 = (GPIO_BASE + 0x0020) as *mut u32; // GPIO output enable register
+
+    const LED_PINS: [u8; NUM_LEDS] = [5, 6, 7, 8, 9, 10, 20, 21, 0];
+
+    for (pin_number, turn_on) in LED_PINS.iter().zip([true, false].iter().cycle()) {
+        // Enable GPIO pin as output
+        let enable_val = core::ptr::read_volatile(GPIO_ENABLE_REG);
+        core::ptr::write_volatile(GPIO_ENABLE_REG, enable_val | (1 << pin_number));
+
+        match turn_on {
+            true => {
+                // Set GPIO pin high
+                let out_val = core::ptr::read_volatile(GPIO_OUT_REG);
+                core::ptr::write_volatile(GPIO_OUT_REG, out_val | (1 << pin_number));
+            }
+            false => {
+                // Set GPIO pin low
+                let out_val = core::ptr::read_volatile(GPIO_OUT_REG);
+                core::ptr::write_volatile(GPIO_OUT_REG, out_val & !(1 << pin_number));
+            }
+        }
     }
 }
