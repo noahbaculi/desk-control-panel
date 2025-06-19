@@ -20,8 +20,8 @@ A MCU like an ESP32 enables a fancier interface with a 0.96" OLED screen.
 The 2 IN - 1 OUT HDMI switch has 3 control pins:
 
 - GND
-- 3.65V
 - INPUT
+- 3.65V
 
 When the INPUT is pulled to GND, the switch's output is the HDMI Input A.
 When the INPUT is pulled to 3.65V, the switch's output is the HDMI Input B.

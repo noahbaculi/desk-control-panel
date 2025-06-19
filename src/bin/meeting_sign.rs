@@ -8,10 +8,11 @@
 
 use desk_control_panel::meeting_instruction::{self, MeetingSignInstruction};
 use embassy_executor::Spawner;
-use esp_backtrace as _;
+use embassy_time::{Duration, Timer};
+// use esp_backtrace as _;
 use esp_hal::{
     clock::CpuClock,
-    gpio::{Input, InputConfig, Level, OutputConfig},
+    gpio::{Input, InputConfig, Level, Output, OutputConfig},
     timer::systimer::SystemTimer,
     uart::{Config, RxConfig, Uart},
     Async,
@@ -23,6 +24,9 @@ extern crate alloc;
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
+
+// Global static for the panic pin
+static mut PANIC_PIN: Option<Output<'static>> = None;
 
 #[embassy_executor::task]
 async fn uart_reader(mut uart: Uart<'static, Async>) {
@@ -87,8 +91,7 @@ async fn main(spawner: Spawner) {
     esp_hal_embassy::init(timer0.alarm0);
 
     info!("Embassy initialized!");
-
-    let rx_pin = peripherals.GPIO21;
+    let rx_pin = peripherals.GPIO1;
 
     let config = Config::default().with_rx(
         RxConfig::default().with_fifo_full_threshold(meeting_instruction::READ_BUF_SIZE as u16),
@@ -100,4 +103,66 @@ async fn main(spawner: Spawner) {
         .into_async();
 
     spawner.spawn(uart_reader(uart)).ok();
+
+    // WARN: This panic pin needs to match the emergency hardcoded panic pin
+    let panic_pin = Output::new(peripherals.GPIO3, Level::High, OutputConfig::default());
+    // Store the pin globally for panic handler access
+    unsafe {
+        PANIC_PIN = Some(panic_pin);
+    }
+
+    Timer::after(Duration::from_secs(5)).await;
+    panic!("Ahhhh");
+}
+
+#[panic_handler]
+fn panic_handler(_info: &core::panic::PanicInfo) -> ! {
+    // Disable interrupts to prevent further issues
+    critical_section::with(|_| {
+        // Try to set the panic pin high
+        unsafe {
+            if let Some(ref mut pin) = PANIC_PIN {
+                pin.set_low();
+            } else {
+                // Fallback: directly access GPIO registers if pin wasn't initialized
+                // This is a last resort and uses unsafe register access
+                emergency_gpio3_low();
+            }
+        }
+    });
+
+    error!("Panic occurred: {:?}", _info);
+
+    // Halt the system
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+/// Emergency function to set GPIO pin low using direct register access
+unsafe fn emergency_gpio3_low() {
+    // ESP32-C3 GPIO register addresses (from ESP32-C3 TRM Table 3.3-3 and Section 5.14.1)
+    // GPIO base address: 0x60004000, offsets from Section 5.14.1:
+    // https://www.espressif.com/sites/default/files/documentation/esp32-c3_technical_reference_manual_en.pdf
+
+    const GPIO_BASE: u32 = 0x60004000;
+    const GPIO_OUT_REG: *mut u32 = (GPIO_BASE + 0x0004) as *mut u32; // GPIO output register
+    const GPIO_ENABLE_REG: *mut u32 = (GPIO_BASE + 0x0020) as *mut u32; // GPIO output enable register
+
+    const GPIO_PIN_NUMBER: u32 = 3;
+
+    // Enable GPIO pin as output
+    let enable_val = core::ptr::read_volatile(GPIO_ENABLE_REG);
+    core::ptr::write_volatile(GPIO_ENABLE_REG, enable_val | (1 << GPIO_PIN_NUMBER));
+
+    // Set GPIO pin low (clear the bit)
+    let out_val = core::ptr::read_volatile(GPIO_OUT_REG);
+    core::ptr::write_volatile(GPIO_OUT_REG, out_val & !(1 << GPIO_PIN_NUMBER));
+}
+
+// Function you can call manually in error conditions
+pub fn trigger_panic_signal() {
+    unsafe {
+        emergency_gpio3_low();
+    }
 }
