@@ -8,27 +8,28 @@
 
 use desk_control_panel::meeting_instruction::{self, MeetingSignInstruction};
 use embassy_executor::Spawner;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
-// use esp_backtrace as _;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use esp_hal::{
     clock::CpuClock,
-    gpio::{AnyPin, Input, InputConfig, Level, Output, OutputConfig},
+    gpio::{AnyPin, Level, Output, OutputConfig},
     timer::systimer::SystemTimer,
     uart::{Config, RxConfig, Uart},
     Async,
 };
 use log::{debug, error, info, trace, warn, LevelFilter};
+use micromath::F32Ext;
 use static_cell::StaticCell;
+
+const NUM_LEDS: usize = 9;
+const LED_PINS: [u8; NUM_LEDS] = [5, 6, 7, 8, 9, 10, 20, 21, 0];
 
 extern crate alloc;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
-
-const NUM_LEDS: usize = 9;
 
 // Global static for the panic pin
 static mut PANIC_PIN: Option<Output<'static>> = None;
@@ -52,7 +53,27 @@ impl<'a> LEDs<'a> {
             led.toggle();
         }
     }
-    // pub fn set_portion_high()
+
+    pub fn set_portion_high(&mut self, numerator: f32, denominator: f32) {
+        let num_on_leds = if numerator <= 0.0 || denominator <= 0.0 {
+            warn!(
+                "Invalid portion values: numerator {}, denominator {}",
+                numerator, denominator
+            );
+            0 // This will turn off all LEDs
+        } else {
+            (NUM_LEDS as f32 * numerator / denominator).round() as usize
+        };
+
+        for (led_idx, led) in self.led_outs.iter_mut().enumerate() {
+            // if led_idx + 1 <= num_on_leds {
+            if led_idx < num_on_leds {
+                led.set_high();
+            } else {
+                led.set_low();
+            }
+        }
+    }
 }
 
 #[esp_hal_embassy::main]
@@ -194,16 +215,15 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     }
 }
 
+// ESP32-C3 GPIO register addresses (from ESP32-C3 TRM Table 3.3-3 and Section 5.14.1)
+// GPIO base address: 0x60004000, offsets from Section 5.14.1:
+// https://www.espressif.com/sites/default/files/documentation/esp32-c3_technical_reference_manual_en.pdf
+const GPIO_BASE_REG: u32 = 0x60004000;
+const GPIO_OUT_REG: *mut u32 = (GPIO_BASE_REG + 0x0004) as *mut u32; // GPIO output register
+const GPIO_ENABLE_REG: *mut u32 = (GPIO_BASE_REG + 0x0020) as *mut u32; // GPIO output enable register
+
 /// Emergency function to set GPIO pin low using direct register access
 unsafe fn emergency_gpio3_low() {
-    // ESP32-C3 GPIO register addresses (from ESP32-C3 TRM Table 3.3-3 and Section 5.14.1)
-    // GPIO base address: 0x60004000, offsets from Section 5.14.1:
-    // https://www.espressif.com/sites/default/files/documentation/esp32-c3_technical_reference_manual_en.pdf
-
-    const GPIO_BASE: u32 = 0x60004000;
-    const GPIO_OUT_REG: *mut u32 = (GPIO_BASE + 0x0004) as *mut u32; // GPIO output register
-    const GPIO_ENABLE_REG: *mut u32 = (GPIO_BASE + 0x0020) as *mut u32; // GPIO output enable register
-
     const GPIO_PIN_NUMBER: u32 = 3;
 
     // Enable GPIO pin as output
@@ -217,16 +237,6 @@ unsafe fn emergency_gpio3_low() {
 
 /// Panic function to set panic pattern on LEDs via GPIO pins
 unsafe fn set_leds_panic_pattern() {
-    // ESP32-C3 GPIO register addresses (from ESP32-C3 TRM Table 3.3-3 and Section 5.14.1)
-    // GPIO base address: 0x60004000, offsets from Section 5.14.1:
-    // https://www.espressif.com/sites/default/files/documentation/esp32-c3_technical_reference_manual_en.pdf
-
-    const GPIO_BASE: u32 = 0x60004000;
-    const GPIO_OUT_REG: *mut u32 = (GPIO_BASE + 0x0004) as *mut u32; // GPIO output register
-    const GPIO_ENABLE_REG: *mut u32 = (GPIO_BASE + 0x0020) as *mut u32; // GPIO output enable register
-
-    const LED_PINS: [u8; NUM_LEDS] = [5, 6, 7, 8, 9, 10, 20, 21, 0];
-
     for (pin_number, turn_on) in LED_PINS.iter().zip([true, false].iter().cycle()) {
         // Enable GPIO pin as output
         let enable_val = core::ptr::read_volatile(GPIO_ENABLE_REG);
