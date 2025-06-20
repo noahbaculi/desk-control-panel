@@ -6,11 +6,15 @@
     holding buffers for the duration of a data transfer."
 )]
 
-use desk_control_panel::meeting_instruction::{self, MeetingSignInstruction};
+use desk_control_panel::meeting_instruction::{
+    self, MeetingSignInstruction, UART_COMMUNICATION_TIMEOUT,
+};
 use embassy_executor::Spawner;
+use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
-use embassy_time::{Duration, Timer};
+use embassy_sync::pubsub::{ImmediatePublisher, PubSubChannel, Subscriber};
+use embassy_time::Timer;
 use esp_hal::{
     clock::CpuClock,
     gpio::{AnyPin, Level, Output, OutputConfig},
@@ -34,47 +38,42 @@ esp_bootloader_esp_idf::esp_app_desc!();
 // Global static for the panic pin
 static mut PANIC_PIN: Option<Output<'static>> = None;
 
+#[derive(Clone)]
+enum MeetingSignState {
+    NoUart,
+    Uart,
+}
+
 type LEDsMutex = Mutex<CriticalSectionRawMutex, LEDs<'static>>;
 static LEDS: StaticCell<LEDsMutex> = StaticCell::new();
 
-struct LEDs<'a> {
-    led_outs: [Output<'a>; 9],
-}
-impl<'a> LEDs<'a> {
-    pub fn new(pins: [AnyPin<'a>; 9]) -> Self {
-        // Convert each pin to an Output
-        let led_outs = pins.map(|pin| Output::new(pin, Level::Low, OutputConfig::default()));
-
-        Self { led_outs }
-    }
-
-    pub fn toggle_all(&mut self) {
-        for led in &mut self.led_outs {
-            led.toggle();
-        }
-    }
-
-    pub fn set_portion_high(&mut self, numerator: f32, denominator: f32) {
-        let num_on_leds = if numerator <= 0.0 || denominator <= 0.0 {
-            warn!(
-                "Invalid portion values: numerator {}, denominator {}",
-                numerator, denominator
-            );
-            0 // This will turn off all LEDs
-        } else {
-            (NUM_LEDS as f32 * numerator / denominator).round() as usize
-        };
-
-        for (led_idx, led) in self.led_outs.iter_mut().enumerate() {
-            // if led_idx + 1 <= num_on_leds {
-            if led_idx < num_on_leds {
-                led.set_high();
-            } else {
-                led.set_low();
-            }
-        }
-    }
-}
+const STATE_PUB_SUB_CAPACITY: usize = 1;
+const STATE_NUM_PUBLISHERS: usize = 0;
+const STATE_NUM_SUBSCRIBERS: usize = 3;
+type MeetingSignStatePubSubChannel = PubSubChannel<
+    CriticalSectionRawMutex,
+    MeetingSignState,
+    STATE_PUB_SUB_CAPACITY,
+    STATE_NUM_SUBSCRIBERS,
+    STATE_NUM_PUBLISHERS,
+>;
+type MeetingSignStatePublisher<'a> = ImmediatePublisher<
+    'a,
+    CriticalSectionRawMutex,
+    MeetingSignState,
+    STATE_PUB_SUB_CAPACITY,
+    STATE_NUM_SUBSCRIBERS,
+    STATE_NUM_PUBLISHERS,
+>;
+type MeetingSignStateSubscriber<'a> = Subscriber<
+    'a,
+    CriticalSectionRawMutex,
+    MeetingSignState,
+    STATE_PUB_SUB_CAPACITY,
+    STATE_NUM_SUBSCRIBERS,
+    STATE_NUM_PUBLISHERS,
+>;
+static MEETING_SIGN_STATE: StaticCell<MeetingSignStatePubSubChannel> = StaticCell::new();
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
@@ -97,7 +96,7 @@ async fn main(spawner: Spawner) {
     }
 
     // WARN: These LED pins need to match the emergency hardcoded LED pins
-    let led_pins: [AnyPin; 9] = [
+    let led_pins: [AnyPin; NUM_LEDS] = [
         peripherals.GPIO5.into(),
         peripherals.GPIO6.into(),
         peripherals.GPIO7.into(),
@@ -109,7 +108,25 @@ async fn main(spawner: Spawner) {
         peripherals.GPIO0.into(),
     ];
     let leds = LEDS.init(Mutex::new(LEDs::new(led_pins)));
-    spawner.spawn(led_test_task(leds)).ok();
+
+    let meeting_sign_state = MEETING_SIGN_STATE.init(MeetingSignStatePubSubChannel::new());
+
+    // We only care about the latest state, so we use immediate publishers
+    let state_publisher_1 = meeting_sign_state.immediate_publisher();
+    let state_publisher_2 = meeting_sign_state.immediate_publisher();
+
+    // Initialize the state to NoUart
+    state_publisher_1.publish_immediate(MeetingSignState::NoUart);
+
+    let state_subscriber_1 = meeting_sign_state
+        .subscriber()
+        .expect("Failed to create state subscriber 1");
+    let state_subscriber_2 = meeting_sign_state
+        .subscriber()
+        .expect("Failed to create state subscriber 2");
+    let mut state_subscriber_3 = meeting_sign_state
+        .subscriber()
+        .expect("Failed to create state subscriber 3");
 
     let rx_pin = peripherals.GPIO1;
     let uart_config = Config::default().with_rx(
@@ -120,27 +137,107 @@ async fn main(spawner: Spawner) {
         .with_rx(rx_pin)
         .into_async();
 
-    spawner.spawn(uart_reader(uart)).ok();
+    spawner
+        .spawn(uart_reader(uart, state_publisher_1, state_subscriber_1))
+        .ok();
+    spawner
+        .spawn(uart_timeout_monitor(state_publisher_2, state_subscriber_2))
+        .ok();
 
-    Timer::after(Duration::from_secs(5)).await;
-    panic!("Ahhhh");
+    // Initialize hardcoded timer if no UART within threshold
+    match select(
+        state_subscriber_3.next_message_pure(),
+        Timer::after(UART_COMMUNICATION_TIMEOUT),
+    )
+    .await
+    {
+        Either::First(state) => {
+            match state {
+                MeetingSignState::NoUart => {
+                    info!("State changed to NoUart.");
+                    // Turn off all LEDs
+                    leds.lock().await.set_portion_high(1.0, 2.0);
+                }
+                MeetingSignState::Uart => {
+                    info!("State changed to Uart.");
+                    // Set LEDs to indicate UART communication
+                    leds.lock().await.set_portion_high(1.0, 1.0);
+                }
+            }
+        }
+        Either::Second(_) => {
+            info!("No initial state change detected within {}s, initializing LEDs according to hardcoded timer...", 
+                UART_COMMUNICATION_TIMEOUT.as_secs());
+        }
+    }
+
+    loop {
+        match select(
+            state_subscriber_3.next_message_pure(),
+            Timer::after_secs(60),
+        )
+        .await
+        {
+            Either::First(state) => {
+                match state {
+                    MeetingSignState::NoUart => {
+                        info!("State changed to NoUart.");
+                        // Turn off all LEDs
+                        leds.lock().await.set_portion_high(1.0, 2.0);
+                    }
+                    MeetingSignState::Uart => {
+                        info!("State changed to Uart.");
+                        // Set LEDs to indicate UART communication
+                        leds.lock().await.set_portion_high(1.0, 1.0);
+                    }
+                }
+            }
+            Either::Second(_) => {
+                info!("No state change detected within 60 seconds, updating LEDs according to internal timer...");
+            }
+        }
+    }
 }
 
-#[embassy_executor::task]
-async fn led_test_task(leds: &'static LEDsMutex) {
-    let mut counter = 0u16;
-    loop {
-        {
-            let mut leds = leds.lock().await;
-            leds.toggle_all();
+struct LEDs<'a> {
+    led_outs: [Output<'a>; NUM_LEDS],
+}
+impl<'a> LEDs<'a> {
+    pub fn new(pins: [AnyPin<'a>; NUM_LEDS]) -> Self {
+        // Convert each pin to an Output
+        let led_outs = pins.map(|pin| Output::new(pin, Level::Low, OutputConfig::default()));
+
+        Self { led_outs }
+    }
+
+    /// Set the portion of LEDs to high based on the given numerator and denominator.
+    pub fn set_portion_high(&mut self, numerator: f32, denominator: f32) {
+        let num_on_leds = if numerator <= 0.0 || denominator <= 0.0 {
+            warn!(
+                "Invalid portion values: numerator {}, denominator {}",
+                numerator, denominator
+            );
+            0 // This will turn off all LEDs
+        } else {
+            (NUM_LEDS as f32 * numerator / denominator).round() as usize
+        };
+
+        for (led_idx, led) in self.led_outs.iter_mut().enumerate() {
+            if led_idx < num_on_leds {
+                led.set_high();
+            } else {
+                led.set_low();
+            }
         }
-        counter = counter.wrapping_add(1);
-        Timer::after(Duration::from_millis(500)).await;
     }
 }
 
 #[embassy_executor::task]
-async fn uart_reader(mut uart: Uart<'static, Async>) {
+async fn uart_reader(
+    mut uart: Uart<'static, Async>,
+    state_publisher: MeetingSignStatePublisher<'static>,
+    mut state_subscriber: MeetingSignStateSubscriber<'static>,
+) {
     debug!("Starting UART reader task");
 
     // Buffers sized appropriately for the MeetingInstruction payload
@@ -167,6 +264,18 @@ async fn uart_reader(mut uart: Uart<'static, Async>) {
                             match postcard::from_bytes::<MeetingSignInstruction>(decoded_data) {
                                 Ok(instruction) => {
                                     debug!("Received: {:?}", instruction);
+                                    match state_subscriber.try_next_message_pure() {
+                                        None | Some(MeetingSignState::NoUart) => {
+                                            // If we were not in UART state, switch to UART
+                                            debug!("Switching state to UART");
+                                            state_publisher
+                                                .publish_immediate(MeetingSignState::Uart);
+                                        }
+                                        Some(MeetingSignState::Uart) => {
+                                            // Already in UART state, just log
+                                            debug!("Already in UART state, processing instruction");
+                                        }
+                                    }
                                 }
                                 Err(e) => warn!("Deserialization error: {:?}", e),
                             }
@@ -189,6 +298,51 @@ async fn uart_reader(mut uart: Uart<'static, Async>) {
     }
 }
 
+#[embassy_executor::task]
+async fn uart_timeout_monitor(
+    state_publisher: MeetingSignStatePublisher<'static>,
+    mut state_subscriber: MeetingSignStateSubscriber<'static>,
+) {
+    debug!("Starting UART timeout monitor task");
+
+    loop {
+        // Wait for UART state
+        loop {
+            match state_subscriber.next_message_pure().await {
+                MeetingSignState::Uart => break,      // Start monitoring
+                MeetingSignState::NoUart => continue, // Keep waiting
+            }
+        }
+
+        // Now we're in UART state, start the timeout monitoring
+        let mut timeout_timer = Timer::after(UART_COMMUNICATION_TIMEOUT);
+
+        loop {
+            match select(state_subscriber.next_message_pure(), &mut timeout_timer).await {
+                Either::First(state) => {
+                    match state {
+                        MeetingSignState::Uart => {
+                            // New UART message received, reset the timer
+                            debug!("UART activity detected, resetting timeout");
+                            timeout_timer = Timer::after(UART_COMMUNICATION_TIMEOUT);
+                        }
+                        MeetingSignState::NoUart => {
+                            // Someone else set it to NoUART, stop monitoring
+                            debug!("State changed to NoUART, stopping timeout monitoring");
+                            break;
+                        }
+                    }
+                }
+                Either::Second(_) => {
+                    // Timeout occurred
+                    debug!("UART communication timed out, signaling NoUART");
+                    state_publisher.publish_immediate(MeetingSignState::NoUart);
+                    break; // Exit inner loop, will wait for next UART state
+                }
+            }
+        }
+    }
+}
 #[panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     // Disable interrupts to prevent further issues
@@ -198,8 +352,6 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
             if let Some(ref mut pin) = PANIC_PIN {
                 pin.set_low();
             } else {
-                // Fallback: directly access GPIO registers if pin wasn't initialized
-                // This is a last resort and uses unsafe register access
                 emergency_gpio3_low();
             }
 

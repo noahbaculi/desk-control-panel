@@ -2,12 +2,16 @@
 
 use crate::meeting_duration::MeetingDuration;
 use defmt::Format;
+use embassy_time::Duration;
 use serde::{Deserialize, Serialize};
 
 // fifo_full_threshold (RX)
 pub const READ_BUF_SIZE: usize = 64;
 // EOT (CTRL-D)
 pub const AT_CMD: u8 = 0x04;
+
+pub const UART_COMMUNICATION_INTERVAL: Duration = Duration::from_secs(1);
+pub const UART_COMMUNICATION_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// Validated time duration in quarter-second units for UART communication.
 ///
