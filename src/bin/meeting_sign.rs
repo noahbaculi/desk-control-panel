@@ -14,7 +14,7 @@ use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::pubsub::{ImmediatePublisher, PubSubChannel, Subscriber};
-use embassy_time::Timer;
+use embassy_time::{Duration, Instant, Timer};
 use esp_hal::{
     clock::CpuClock,
     gpio::{AnyPin, Level, Output, OutputConfig},
@@ -28,6 +28,7 @@ use static_cell::StaticCell;
 
 const NUM_LEDS: usize = 9;
 const LED_PINS: [u8; NUM_LEDS] = [5, 6, 7, 8, 9, 10, 20, 21, 0];
+const DEFAULT_MAX_DURATION: Duration = Duration::from_secs(60 * 90); // 90 minutes
 
 extern crate alloc;
 
@@ -230,6 +231,63 @@ impl<'a> LEDs<'a> {
             }
         }
     }
+
+    pub fn set_pattern(&mut self, pattern: u16) {
+        for (i, led) in self.led_outs.iter_mut().enumerate() {
+            if pattern & (1 << i) != 0 {
+                led.set_high();
+            } else {
+                led.set_low();
+            }
+        }
+    }
+
+    pub fn display_current_timer(&mut self) {
+        let on_duration = Instant::now().elapsed();
+        if on_duration >= DEFAULT_MAX_DURATION {
+            // If the timer has expired, turn off all LEDs
+            for led in self.led_outs.iter_mut() {
+                led.set_low();
+            }
+        } else {
+            // Calculate the portion of time elapsed
+            let portion = on_duration.as_secs() as f32 / DEFAULT_MAX_DURATION.as_secs() as f32;
+            assert!(
+                portion >= 0.0,
+                "Portion is zero or negative: {on_duration} / {DEFAULT_MAX_DURATION} = {}",
+                portion
+            );
+            // Set LEDs based on the portion
+            self.set_portion_high(
+                on_duration.as_secs() as f32,
+                DEFAULT_MAX_DURATION.as_secs() as f32,
+            );
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Progress {
+    elapsed: u32,
+    total: u32,
+}
+
+impl Progress {
+    fn new(current: u32, total: u32) -> Self {
+        Self { current, total }
+    }
+
+    fn as_ratio(&self) -> f32 {
+        if self.total == 0 {
+            0.0
+        } else {
+            self.current as f32 / self.total as f32
+        }
+    }
+}
+
+fn set_progress(&mut self, progress: Progress) {
+    self.set_portion_high(progress.as_ratio());
 }
 
 #[embassy_executor::task]
@@ -389,6 +447,7 @@ unsafe fn emergency_gpio3_low() {
 
 /// Panic function to set panic pattern on LEDs via GPIO pins
 unsafe fn set_leds_panic_pattern() {
+    // Set every other LED high
     for (pin_number, turn_on) in LED_PINS.iter().zip([true, false].iter().cycle()) {
         // Enable GPIO pin as output
         let enable_val = core::ptr::read_volatile(GPIO_ENABLE_REG);

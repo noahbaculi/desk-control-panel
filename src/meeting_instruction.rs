@@ -43,18 +43,34 @@ impl From<MeetingDuration> for QuarterSeconds {
     }
 }
 
-/// Instructions sent to meeting sign.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Format)]
-pub enum MeetingSignInstruction {
-    Duration(QuarterSeconds),
-    Off,
-    Diagnostic,
+#[serde(transparent)]
+pub struct ProgressRatio(pub u8);
+impl ProgressRatio {
+    fn from_values(numerator: u8, denominator: u8) -> Option<Self> {
+        if denominator == 0 {
+            return None; // Avoid division by zero
+        }
+        if numerator > denominator {
+            return None; // Avoid ratios greater than 1
+        }
+
+        let ratio = ((numerator as u16) * (u8::MAX as u16) / denominator as u16) as u8;
+        Some(Self(ratio))
+    }
+
+    fn apply_to_value(&self, value: u16) -> u16 {
+        // Apply the progress ratio to a value
+        (value as u32 * self.0 as u32 / u8::MAX as u32) as u16
+    }
 }
 
-impl From<MeetingDuration> for MeetingSignInstruction {
-    fn from(value: MeetingDuration) -> Self {
-        Self::Duration(value.into())
-    }
+/// Instructions sent to meeting sign over UART
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Format)]
+pub enum MeetingSignInstruction {
+    On(ProgressRatio),
+    Off,
+    Diagnostic,
 }
 
 // Max postcard serialized size
