@@ -1,8 +1,10 @@
 #![allow(dead_code)]
 
 use crate::meeting_duration::MeetingDuration;
+use core::ops::{Div, Mul};
 use defmt::Format;
 use embassy_time::Duration;
+use num_traits::{PrimInt, Unsigned};
 use serde::{Deserialize, Serialize};
 
 // fifo_full_threshold (RX)
@@ -47,21 +49,25 @@ impl From<MeetingDuration> for QuarterSeconds {
 #[serde(transparent)]
 pub struct ProgressRatio(pub u8);
 impl ProgressRatio {
-    fn from_values(numerator: u8, denominator: u8) -> Option<Self> {
-        if denominator == 0 {
-            return None; // Avoid division by zero
-        }
-        if numerator > denominator {
-            return None; // Avoid ratios greater than 1
+    /// Create a ratio from `numerator / denominator`, scaled to 0..=255
+    pub fn from_values<T>(numerator: T, denominator: T) -> Option<Self>
+    where
+        T: PrimInt + Unsigned,
+    {
+        if denominator.is_zero() {
+            return None;
         }
 
-        let ratio = ((numerator as u16) * (u8::MAX as u16) / denominator as u16) as u8;
-        Some(Self(ratio))
+        let scaled = (numerator.to_u32()? * u8::MAX as u32) / denominator.to_u32()?;
+        Some(Self(scaled.min(u8::MAX as u32) as u8))
     }
 
-    fn apply_to_value(&self, value: u16) -> u16 {
-        // Apply the progress ratio to a value
-        (value as u32 * self.0 as u32 / u8::MAX as u32) as u16
+    /// Apply the ratio to a value of arbitrary unsigned integer type
+    pub fn apply_to<T>(&self, value: T) -> T
+    where
+        T: Mul<u32, Output = T> + Div<u32, Output = T>,
+    {
+        value * self.0 as u32 / u8::MAX as u32
     }
 }
 

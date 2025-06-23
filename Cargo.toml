@@ -54,6 +54,7 @@ esp-println = { version = "0.14.0", features = [
 ] }
 log = "0.4.27"
 micromath = "2.1.0"
+num-traits = { version = "0.2.19", default-features = false }
 panic-rtt-target = { version = "0.2.0", features = ["defmt"] }
 postcard = { version = "1.1.1", features = ["use-defmt"] }
 rotary-encoder-hal = { version = "0.6.0", features = [
