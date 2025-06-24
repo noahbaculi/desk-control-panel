@@ -139,21 +139,23 @@ async fn main(spawner: Spawner) {
         .spawn(uart_timeout_monitor(state_publisher_2, state_subscriber_1))
         .ok();
 
+    let mut loop_timeout_duration = UART_COMMUNICATION_TIMEOUT;
+
     // Main loop
     loop {
         match select(
             state_subscriber_2.next_message_pure(),
-            Timer::after(UART_COMMUNICATION_TIMEOUT),
+            Timer::after(loop_timeout_duration),
         )
         .await
         {
             Either::First(state) => match state {
                 MeetingSignState::NoUart => {
-                    info!("Initial state changed to NoUart.");
+                    info!("State changed to NoUart.");
                     leds.lock().await.set_ratio_low(ProgressRatio(u8::MAX / 2));
                 }
                 MeetingSignState::Uart(instruction) => {
-                    info!("Initial state changed to Uart.");
+                    info!("State changed to Uart.");
                     match instruction {
                         MeetingSignInstruction::On(progress_ratio) => {
                             leds.lock().await.set_ratio_low(progress_ratio)
@@ -167,13 +169,17 @@ async fn main(spawner: Spawner) {
                 }
             },
             Either::Second(_) => {
-                info!("No initial state change detected within {}s, initializing LEDs according to builtin timer...", 
-                UART_COMMUNICATION_TIMEOUT.as_secs());
+                info!(
+                    "No state change detected within {}s, displaying LEDs according to builtin timer...",
+                    loop_timeout_duration.as_secs()
+                );
+                loop_timeout_duration = Duration::from_secs(60); // Increase the timeout now
 
-                // leds.lock().await.display_builtin_timer();
                 leds.lock().await.set_pattern_array(&[
                     false, true, true, false, false, false, true, true, false,
                 ]);
+                Timer::after(Duration::from_secs(1)).await;
+                leds.lock().await.display_builtin_timer();
             }
         }
     }
