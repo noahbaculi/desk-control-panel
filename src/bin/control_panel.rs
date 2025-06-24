@@ -12,7 +12,7 @@ use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::{Input, InputConfig, Pull};
+use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::{
     uart::{Config, RxConfig, Uart},
@@ -43,18 +43,32 @@ async fn main(spawner: Spawner) {
 
     info!("Embassy initialized!");
 
-    let tx_pin = peripherals.GPIO21;
-
-    let config = Config::default().with_rx(
-        RxConfig::default().with_fifo_full_threshold(meeting_instruction::READ_BUF_SIZE as u16),
+    let usb_switch_led_a = Input::new(
+        peripherals.GPIO20,
+        InputConfig::default().with_pull(Pull::Down),
+    );
+    let usb_switch_led_b = Input::new(
+        peripherals.GPIO21,
+        InputConfig::default().with_pull(Pull::Down),
     );
 
-    let uart = Uart::new(peripherals.UART0, config)
-        .unwrap()
-        .with_tx(tx_pin)
-        .into_async();
+    let usb_power_2 = Output::new(peripherals.GPIO9, Level::Low, OutputConfig::default());
 
-    spawner.spawn(writer(uart)).ok();
+    let meeting_sign_power = Output::new(peripherals.GPIO6, Level::Low, OutputConfig::default());
+    // This signal should be 3.3V high when the Meeting Sign is operating correctly
+    let meeting_sign_sense = Input::new(
+        peripherals.GPIO7,
+        InputConfig::default().with_pull(Pull::Down),
+    );
+    let meeting_sign_uart_pin = peripherals.GPIO8;
+    let meeting_sign_uart_config = Config::default().with_rx(
+        RxConfig::default().with_fifo_full_threshold(meeting_instruction::READ_BUF_SIZE as u16),
+    );
+    let meeting_sign_uart = Uart::new(peripherals.UART0, meeting_sign_uart_config)
+        .unwrap()
+        .with_tx(meeting_sign_uart_pin)
+        .into_async();
+    spawner.spawn(writer(meeting_sign_uart)).ok();
 
     let rotary_encoder_button = Input::new(peripherals.GPIO0, InputConfig::default());
     info!(
@@ -133,7 +147,13 @@ async fn writer(mut uart: Uart<'static, Async>) {
         for num_minutes in 1..=120 {
             let duration =
                 MeetingDuration::from_minutes(num_minutes).expect("Could not create duration");
-            let payload: MeetingSignInstruction = duration.into();
+            let payload = MeetingSignInstruction::On(
+                meeting_instruction::ProgressRatio::from_durations(
+                    &duration.into(),
+                    &MeetingDuration::MAX.into(),
+                )
+                .expect("Invalid progress ratio"),
+            );
 
             // Serialize the payload
             let serialized = postcard::to_slice(&payload, &mut serialize_buf).unwrap();

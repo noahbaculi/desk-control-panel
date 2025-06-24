@@ -7,7 +7,7 @@
 )]
 
 use desk_control_panel::meeting_instruction::{
-    self, MeetingSignInstruction, UART_COMMUNICATION_TIMEOUT,
+    self, MeetingSignInstruction, ProgressRatio, UART_COMMUNICATION_TIMEOUT,
 };
 use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
@@ -23,7 +23,6 @@ use esp_hal::{
     Async,
 };
 use log::{debug, error, info, trace, warn, LevelFilter};
-use micromath::F32Ext;
 use static_cell::StaticCell;
 
 const NUM_LEDS: usize = 9;
@@ -42,7 +41,7 @@ static mut PANIC_PIN: Option<Output<'static>> = None;
 #[derive(Clone)]
 enum MeetingSignState {
     NoUart,
-    Uart,
+    Uart(MeetingSignInstruction),
 }
 
 type LEDsMutex = Mutex<CriticalSectionRawMutex, LEDs<'static>>;
@@ -50,7 +49,7 @@ static LEDS: StaticCell<LEDsMutex> = StaticCell::new();
 
 const STATE_PUB_SUB_CAPACITY: usize = 1;
 const STATE_NUM_PUBLISHERS: usize = 0;
-const STATE_NUM_SUBSCRIBERS: usize = 3;
+const STATE_NUM_SUBSCRIBERS: usize = 2;
 type MeetingSignStatePubSubChannel = PubSubChannel<
     CriticalSectionRawMutex,
     MeetingSignState,
@@ -122,12 +121,9 @@ async fn main(spawner: Spawner) {
     let state_subscriber_1 = meeting_sign_state
         .subscriber()
         .expect("Failed to create state subscriber 1");
-    let state_subscriber_2 = meeting_sign_state
+    let mut state_subscriber_2 = meeting_sign_state
         .subscriber()
         .expect("Failed to create state subscriber 2");
-    let mut state_subscriber_3 = meeting_sign_state
-        .subscriber()
-        .expect("Failed to create state subscriber 3");
 
     let rx_pin = peripherals.GPIO1;
     let uart_config = Config::default().with_rx(
@@ -138,63 +134,46 @@ async fn main(spawner: Spawner) {
         .with_rx(rx_pin)
         .into_async();
 
+    spawner.spawn(uart_reader(uart, state_publisher_1)).ok();
     spawner
-        .spawn(uart_reader(uart, state_publisher_1, state_subscriber_1))
-        .ok();
-    spawner
-        .spawn(uart_timeout_monitor(state_publisher_2, state_subscriber_2))
+        .spawn(uart_timeout_monitor(state_publisher_2, state_subscriber_1))
         .ok();
 
-    // Initialize hardcoded timer if no UART within threshold
-    match select(
-        state_subscriber_3.next_message_pure(),
-        Timer::after(UART_COMMUNICATION_TIMEOUT),
-    )
-    .await
-    {
-        Either::First(state) => {
-            match state {
-                MeetingSignState::NoUart => {
-                    info!("State changed to NoUart.");
-                    // Turn off all LEDs
-                    leds.lock().await.set_portion_high(1.0, 2.0);
-                }
-                MeetingSignState::Uart => {
-                    info!("State changed to Uart.");
-                    // Set LEDs to indicate UART communication
-                    leds.lock().await.set_portion_high(1.0, 1.0);
-                }
-            }
-        }
-        Either::Second(_) => {
-            info!("No initial state change detected within {}s, initializing LEDs according to hardcoded timer...", 
-                UART_COMMUNICATION_TIMEOUT.as_secs());
-        }
-    }
-
+    // Main loop
     loop {
         match select(
-            state_subscriber_3.next_message_pure(),
-            Timer::after_secs(60),
+            state_subscriber_2.next_message_pure(),
+            Timer::after(UART_COMMUNICATION_TIMEOUT),
         )
         .await
         {
-            Either::First(state) => {
-                match state {
-                    MeetingSignState::NoUart => {
-                        info!("State changed to NoUart.");
-                        // Turn off all LEDs
-                        leds.lock().await.set_portion_high(1.0, 2.0);
-                    }
-                    MeetingSignState::Uart => {
-                        info!("State changed to Uart.");
-                        // Set LEDs to indicate UART communication
-                        leds.lock().await.set_portion_high(1.0, 1.0);
-                    }
+            Either::First(state) => match state {
+                MeetingSignState::NoUart => {
+                    info!("Initial state changed to NoUart.");
+                    leds.lock().await.set_ratio_low(ProgressRatio(u8::MAX / 2));
                 }
-            }
+                MeetingSignState::Uart(instruction) => {
+                    info!("Initial state changed to Uart.");
+                    match instruction {
+                        MeetingSignInstruction::On(progress_ratio) => {
+                            leds.lock().await.set_ratio_low(progress_ratio)
+                        }
+                        MeetingSignInstruction::Off => {
+                            leds.lock().await.set_ratio_low(ProgressRatio(0))
+                        }
+                        MeetingSignInstruction::Diagnostic => todo!(),
+                    }
+                    leds.lock().await.set_ratio_low(ProgressRatio(u8::MAX));
+                }
+            },
             Either::Second(_) => {
-                info!("No state change detected within 60 seconds, updating LEDs according to internal timer...");
+                info!("No initial state change detected within {}s, initializing LEDs according to builtin timer...", 
+                UART_COMMUNICATION_TIMEOUT.as_secs());
+
+                // leds.lock().await.display_builtin_timer();
+                leds.lock().await.set_pattern_array(&[
+                    false, true, true, false, false, false, true, true, false,
+                ]);
             }
         }
     }
@@ -211,20 +190,22 @@ impl<'a> LEDs<'a> {
         Self { led_outs }
     }
 
-    /// Set the portion of LEDs to high based on the given numerator and denominator.
-    pub fn set_portion_high(&mut self, numerator: f32, denominator: f32) {
-        let num_on_leds = if numerator <= 0.0 || denominator <= 0.0 {
-            warn!(
-                "Invalid portion values: numerator {}, denominator {}",
-                numerator, denominator
-            );
-            0 // This will turn off all LEDs
-        } else {
-            (NUM_LEDS as f32 * numerator / denominator).round() as usize
-        };
+    /// Set the portion of LEDs to low based on the given numerator and denominator.
+    pub fn set_ratio_low(&mut self, ratio: ProgressRatio) {
+        let num_on_leds = ratio.apply_to(NUM_LEDS);
 
         for (led_idx, led) in self.led_outs.iter_mut().enumerate() {
             if led_idx < num_on_leds {
+                led.set_low();
+            } else {
+                led.set_high();
+            }
+        }
+    }
+
+    pub fn set_pattern_array(&mut self, pattern: &[bool; NUM_LEDS]) {
+        for (led, &should_be_on) in self.led_outs.iter_mut().zip(pattern.iter()) {
+            if should_be_on {
                 led.set_high();
             } else {
                 led.set_low();
@@ -232,17 +213,7 @@ impl<'a> LEDs<'a> {
         }
     }
 
-    pub fn set_pattern(&mut self, pattern: u16) {
-        for (i, led) in self.led_outs.iter_mut().enumerate() {
-            if pattern & (1 << i) != 0 {
-                led.set_high();
-            } else {
-                led.set_low();
-            }
-        }
-    }
-
-    pub fn display_current_timer(&mut self) {
+    pub fn display_builtin_timer(&mut self) {
         let on_duration = Instant::now().elapsed();
         if on_duration >= DEFAULT_MAX_DURATION {
             // If the timer has expired, turn off all LEDs
@@ -251,50 +222,18 @@ impl<'a> LEDs<'a> {
             }
         } else {
             // Calculate the portion of time elapsed
-            let portion = on_duration.as_secs() as f32 / DEFAULT_MAX_DURATION.as_secs() as f32;
-            assert!(
-                portion >= 0.0,
-                "Portion is zero or negative: {on_duration} / {DEFAULT_MAX_DURATION} = {}",
-                portion
-            );
+            let ratio = ProgressRatio::from_durations(&on_duration, &DEFAULT_MAX_DURATION)
+                .expect("Failed to calculate ratio from durations");
             // Set LEDs based on the portion
-            self.set_portion_high(
-                on_duration.as_secs() as f32,
-                DEFAULT_MAX_DURATION.as_secs() as f32,
-            );
+            self.set_ratio_low(ratio);
         }
     }
-}
-
-#[derive(Clone, Copy)]
-struct Progress {
-    elapsed: u32,
-    total: u32,
-}
-
-impl Progress {
-    fn new(current: u32, total: u32) -> Self {
-        Self { current, total }
-    }
-
-    fn as_ratio(&self) -> f32 {
-        if self.total == 0 {
-            0.0
-        } else {
-            self.current as f32 / self.total as f32
-        }
-    }
-}
-
-fn set_progress(&mut self, progress: Progress) {
-    self.set_portion_high(progress.as_ratio());
 }
 
 #[embassy_executor::task]
 async fn uart_reader(
     mut uart: Uart<'static, Async>,
     state_publisher: MeetingSignStatePublisher<'static>,
-    mut state_subscriber: MeetingSignStateSubscriber<'static>,
 ) {
     debug!("Starting UART reader task");
 
@@ -322,18 +261,8 @@ async fn uart_reader(
                             match postcard::from_bytes::<MeetingSignInstruction>(decoded_data) {
                                 Ok(instruction) => {
                                     debug!("Received: {:?}", instruction);
-                                    match state_subscriber.try_next_message_pure() {
-                                        None | Some(MeetingSignState::NoUart) => {
-                                            // If we were not in UART state, switch to UART
-                                            debug!("Switching state to UART");
-                                            state_publisher
-                                                .publish_immediate(MeetingSignState::Uart);
-                                        }
-                                        Some(MeetingSignState::Uart) => {
-                                            // Already in UART state, just log
-                                            debug!("Already in UART state, processing instruction");
-                                        }
-                                    }
+                                    state_publisher
+                                        .publish_immediate(MeetingSignState::Uart(instruction));
                                 }
                                 Err(e) => warn!("Deserialization error: {:?}", e),
                             }
@@ -367,7 +296,7 @@ async fn uart_timeout_monitor(
         // Wait for UART state
         loop {
             match state_subscriber.next_message_pure().await {
-                MeetingSignState::Uart => break,      // Start monitoring
+                MeetingSignState::Uart(_) => break,   // Start monitoring
                 MeetingSignState::NoUart => continue, // Keep waiting
             }
         }
@@ -379,7 +308,7 @@ async fn uart_timeout_monitor(
             match select(state_subscriber.next_message_pure(), &mut timeout_timer).await {
                 Either::First(state) => {
                     match state {
-                        MeetingSignState::Uart => {
+                        MeetingSignState::Uart(_) => {
                             // New UART message received, reset the timer
                             debug!("UART activity detected, resetting timeout");
                             timeout_timer = Timer::after(UART_COMMUNICATION_TIMEOUT);

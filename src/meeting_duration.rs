@@ -82,6 +82,12 @@ impl TryFrom<Duration> for MeetingDuration {
     }
 }
 
+impl From<MeetingDuration> for Duration {
+    fn from(meeting_duration: MeetingDuration) -> Self {
+        meeting_duration.0
+    }
+}
+
 // Easy access to the inner Duration
 impl AsRef<Duration> for MeetingDuration {
     fn as_ref(&self) -> &Duration {

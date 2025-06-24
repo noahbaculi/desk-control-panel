@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-use crate::meeting_duration::MeetingDuration;
 use core::ops::{Div, Mul};
 use defmt::Format;
 use embassy_time::Duration;
@@ -12,40 +11,11 @@ pub const READ_BUF_SIZE: usize = 64;
 // EOT (CTRL-D)
 pub const AT_CMD: u8 = 0x04;
 
-pub const UART_COMMUNICATION_INTERVAL: Duration = Duration::from_secs(1);
-pub const UART_COMMUNICATION_TIMEOUT: Duration = Duration::from_secs(4);
+const UART_INTERVAL_MS: u64 = 500;
+pub const UART_COMMUNICATION_INTERVAL: Duration = Duration::from_millis(UART_INTERVAL_MS);
+pub const UART_COMMUNICATION_TIMEOUT: Duration = Duration::from_millis(4 * UART_INTERVAL_MS);
 
-/// Validated time duration in quarter-second units for UART communication.
-///
-/// This wrapper ensures durations are properly validated before being sent over UART.
-/// Cannot be constructed directly - must be created from a `MeetingDuration`.
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Format)]
-pub struct QuarterSeconds(u16);
-
-impl QuarterSeconds {
-    /// Create a new QuarterSeconds value (crate-internal use only).
-    pub(crate) fn new(quarter_seconds: u16) -> Self {
-        Self(quarter_seconds)
-    }
-
-    /// Get the raw quarter-seconds value.
-    pub fn get(&self) -> u16 {
-        self.0
-    }
-}
-
-impl From<MeetingDuration> for QuarterSeconds {
-    /// Convert a validated MeetingDuration to quarter-seconds for UART transmission.
-    ///
-    /// # Panics
-    /// Panics if the duration cannot be represented as quarter-seconds. This should not happen
-    /// with validated MeetingDuration instances.
-    fn from(value: MeetingDuration) -> Self {
-        Self(value.to_uart_quarter_seconds())
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Format)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Format)]
 #[serde(transparent)]
 pub struct ProgressRatio(pub u8);
 impl ProgressRatio {
@@ -58,21 +28,32 @@ impl ProgressRatio {
             return None;
         }
 
-        let scaled = (numerator.to_u32()? * u8::MAX as u32) / denominator.to_u32()?;
-        Some(Self(scaled.min(u8::MAX as u32) as u8))
+        let scaled = numerator
+            .to_u64()?
+            .saturating_mul(u8::MAX as u64)
+            .saturating_div(denominator.to_u64()?) as u8;
+        Some(Self(scaled))
     }
 
     /// Apply the ratio to a value of arbitrary unsigned integer type
     pub fn apply_to<T>(&self, value: T) -> T
     where
-        T: Mul<u32, Output = T> + Div<u32, Output = T>,
+        T: Mul<usize, Output = T> + Div<usize, Output = T>,
     {
-        value * self.0 as u32 / u8::MAX as u32
+        value * self.0 as usize / u8::MAX as usize
+    }
+
+    /// Create a ProgressRatio from two `Duration`s
+    pub fn from_durations(numerator: &Duration, denominator: &Duration) -> Option<Self> {
+        let num = numerator.as_millis();
+        let denom = denominator.as_millis();
+
+        Self::from_values(num, denom)
     }
 }
 
 /// Instructions sent to meeting sign over UART
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Format)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Format)]
 pub enum MeetingSignInstruction {
     On(ProgressRatio),
     Off,

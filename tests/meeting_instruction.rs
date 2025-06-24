@@ -6,8 +6,10 @@
 mod tests {
     use defmt::{assert, info};
     use desk_control_panel::{
-        meeting_duration::{MeetingDuration, MeetingDurationError},
-        meeting_instruction::{MeetingSignInstruction, MAX_ENCODED_SIZE, MAX_PAYLOAD_SIZE},
+        meeting_duration::MeetingDurationError,
+        meeting_instruction::{
+            MeetingSignInstruction, ProgressRatio, MAX_ENCODED_SIZE, MAX_PAYLOAD_SIZE,
+        },
     };
     use esp_hal::timer::systimer::SystemTimer;
     use rtt_target::rtt_init_defmt;
@@ -20,6 +22,23 @@ mod tests {
         esp_hal_embassy::init(timer0.alarm0);
 
         rtt_init_defmt!();
+    }
+
+    #[test]
+    fn test_from_values() -> Result<(), MeetingDurationError> {
+        assert_eq!(ProgressRatio::from_values(1u8, 2), Some(ProgressRatio(127)));
+        assert_eq!(
+            ProgressRatio::from_values(50u8, 100),
+            Some(ProgressRatio(127))
+        );
+        assert_eq!(ProgressRatio::from_values(0u8, 0), None);
+        assert_eq!(ProgressRatio::from_values(3u8, 4), Some(ProgressRatio(191)));
+        assert_eq!(
+            ProgressRatio::from_values(123u8, u8::MAX),
+            Some(ProgressRatio(123))
+        );
+
+        Ok(())
     }
 
     #[test]
@@ -36,12 +55,10 @@ mod tests {
         let instructions = [
             MeetingSignInstruction::Off,
             MeetingSignInstruction::Diagnostic,
-            MeetingSignInstruction::from(MeetingDuration::from_minutes(1)?),
-            MeetingSignInstruction::from(MeetingDuration::from_minutes(5)?),
-            MeetingSignInstruction::from(MeetingDuration::from_minutes(30)?),
-            MeetingSignInstruction::from(MeetingDuration::from_minutes(60)?),
-            MeetingSignInstruction::from(MeetingDuration::from_minutes(120)?),
-            MeetingSignInstruction::from(MeetingDuration::MAX),
+            MeetingSignInstruction::On(ProgressRatio(0)),
+            MeetingSignInstruction::On(ProgressRatio(85)),
+            MeetingSignInstruction::On(ProgressRatio(127)),
+            MeetingSignInstruction::On(ProgressRatio(u8::MAX)),
         ];
 
         for (idx, orig_instruction) in instructions.iter().enumerate() {
