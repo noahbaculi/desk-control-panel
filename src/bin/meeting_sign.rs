@@ -38,15 +38,14 @@ esp_bootloader_esp_idf::esp_app_desc!();
 // Global static for the panic pin
 static mut PANIC_PIN: Option<Output<'static>> = None;
 
+type LEDsMutex = Mutex<CriticalSectionRawMutex, LEDs<'static>>;
+static LEDS: StaticCell<LEDsMutex> = StaticCell::new();
+
 #[derive(Clone)]
 enum MeetingSignState {
     NoUart,
     Uart(MeetingSignInstruction),
 }
-
-type LEDsMutex = Mutex<CriticalSectionRawMutex, LEDs<'static>>;
-static LEDS: StaticCell<LEDsMutex> = StaticCell::new();
-
 const STATE_PUB_SUB_CAPACITY: usize = 1;
 const STATE_NUM_PUBLISHERS: usize = 0;
 const STATE_NUM_SUBSCRIBERS: usize = 2;

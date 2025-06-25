@@ -5,14 +5,29 @@
     reason = "mem::forget is generally not safe to do with esp_hal types, especially those \
     holding buffers for the duration of a data transfer."
 )]
+#![allow(unused_imports)]
 
+use desk_control_panel::control_panel::state::{
+    ControlPanelState, MeetingSignState, UISection, UISelectionMode, USBPowerState, USBSwitch,
+    USBSwitchOutput, USBSwitchState,
+};
 use desk_control_panel::meeting_duration::MeetingDuration;
 use desk_control_panel::meeting_instruction::{self, MeetingSignInstruction};
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::mutex::Mutex;
+use embassy_time::{Duration, Ticker, Timer};
+use embedded_graphics::primitives::{Line, Polyline};
+use embedded_graphics::{
+    pixelcolor::BinaryColor,
+    prelude::*,
+    primitives::{PrimitiveStyle, Rectangle},
+};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
+use esp_hal::i2c::master::I2c;
+use esp_hal::time::Rate;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::{
     uart::{Config, RxConfig, Uart},
@@ -21,8 +36,22 @@ use esp_hal::{
 use log::LevelFilter;
 use log::{debug, info};
 use rotary_encoder_hal::{Direction, Rotary};
+use ssd1306::mode::DisplayConfig;
+use ssd1306::{I2CDisplayInterface, Ssd1306};
+use static_cell::StaticCell;
 
 extern crate alloc;
+
+type StateMutex = Mutex<CriticalSectionRawMutex, ControlPanelState>;
+static STATE_MUTEX: StaticCell<StateMutex> = StaticCell::new();
+// static STATE_MUTEX: StateMutex = StateMutex::new(ControlPanelState {
+//     usb_switch: USBSwitchState::Off,
+//     meeting_sign: MeetingSignState::Off,
+//     usb_power_1: USBPowerState::Off,
+//     usb_power_2: USBPowerState::Off,
+//     ui_selection_mode: RotaryEncoderSelectionMode::Menu,
+//     ui_section: UISection::MeetingSign,
+// });
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -52,15 +81,31 @@ async fn main(spawner: Spawner) {
         InputConfig::default().with_pull(Pull::Down),
     );
 
-    let usb_power_2 = Output::new(peripherals.GPIO9, Level::Low, OutputConfig::default());
+    let usb_power_1 = Output::new(peripherals.GPIO9, Level::Low, OutputConfig::default());
+    let usb_power_2 = Output::new(peripherals.GPIO10, Level::Low, OutputConfig::default());
 
-    let meeting_sign_power = Output::new(peripherals.GPIO6, Level::Low, OutputConfig::default());
+    let meeting_sign_power = Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default());
     // This signal should be 3.3V high when the Meeting Sign is operating correctly
     let meeting_sign_sense = Input::new(
-        peripherals.GPIO7,
+        peripherals.GPIO6,
         InputConfig::default().with_pull(Pull::Down),
     );
-    let meeting_sign_uart_pin = peripherals.GPIO8;
+
+    let contorl_panel_state = STATE_MUTEX.init(StateMutex::new(ControlPanelState {
+        usb_switch: USBSwitch {
+            led_a: usb_switch_led_a,
+            led_b: usb_switch_led_b,
+        },
+        usb_power_1: usb_power_1,
+        usb_power_2: usb_power_2,
+        meeting_sign_power: meeting_sign_power,
+        ui_selection_mode: UISelectionMode::Menu,
+        ui_section: UISection::MeetingSign,
+    }));
+    spawner
+        .spawn(monitor_meeting_sign_sense(meeting_sign_sense))
+        .ok();
+    let meeting_sign_uart_pin = peripherals.GPIO7;
     let meeting_sign_uart_config = Config::default().with_rx(
         RxConfig::default().with_fifo_full_threshold(meeting_instruction::READ_BUF_SIZE as u16),
     );
@@ -70,7 +115,7 @@ async fn main(spawner: Spawner) {
         .into_async();
     spawner.spawn(writer(meeting_sign_uart)).ok();
 
-    let rotary_encoder_button = Input::new(peripherals.GPIO0, InputConfig::default());
+    let rotary_encoder_button = Input::new(peripherals.GPIO2, InputConfig::default());
     info!(
         "Rotary encoder button is {:?}!",
         rotary_encoder_button.level()
@@ -80,11 +125,11 @@ async fn main(spawner: Spawner) {
         .ok();
 
     let rotary_encoder_clk = Input::new(
-        peripherals.GPIO2,
+        peripherals.GPIO4,
         InputConfig::default().with_pull(Pull::Up),
     );
     let rotary_encoder_dt = Input::new(
-        peripherals.GPIO1,
+        peripherals.GPIO3,
         InputConfig::default().with_pull(Pull::Up),
     );
     spawner
@@ -93,6 +138,44 @@ async fn main(spawner: Spawner) {
             rotary_encoder_dt,
         ))
         .ok();
+
+    // Initialize and configure I2C
+    let i2c = I2c::new(
+        peripherals.I2C0,
+        esp_hal::i2c::master::Config::default().with_frequency(Rate::from_khz(400)),
+    )
+    .unwrap()
+    .with_sda(peripherals.GPIO0)
+    .with_scl(peripherals.GPIO1);
+
+    let interface = I2CDisplayInterface::new(i2c);
+    let mut display = Ssd1306::new(
+        interface,
+        ssd1306::size::DisplaySize128x64,
+        ssd1306::prelude::DisplayRotation::Rotate0,
+    )
+    .into_buffered_graphics_mode();
+    display.init().unwrap();
+
+    // Clear the display once at startup
+    display.clear(BinaryColor::Off).unwrap();
+    display.flush().unwrap();
+
+    let mut ticker = Ticker::every(Duration::from_millis(50));
+
+    // Main loop
+    loop {
+        // Draw USB switch state
+        contorl_panel_state
+            .lock()
+            .await
+            .usb_switch
+            .draw(&mut display)
+            .unwrap();
+
+        display.flush().unwrap();
+        ticker.next().await;
+    }
 }
 
 #[embassy_executor::task]
@@ -132,6 +215,28 @@ async fn monitor_rotary_encoder_button(mut button: Input<'static>) {
 
         // Debounce the button press
         Timer::after(Duration::from_millis(200)).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn monitor_meeting_sign_sense(
+    mut digital_input: Input<'static>,
+    // control_panel_state: &'static StateMutex,
+) {
+    debug!("Starting monitor_meeting_sign_sense task");
+    loop {
+        digital_input.wait_for_any_edge().await;
+        // Debounce the change
+        Timer::after(Duration::from_millis(100)).await;
+
+        match digital_input.level() {
+            Level::High => {
+                info!("Meeting sign sense is HIGH!");
+            }
+            Level::Low => {
+                info!("Meeting sign sense is LOW!");
+            }
+        }
     }
 }
 
