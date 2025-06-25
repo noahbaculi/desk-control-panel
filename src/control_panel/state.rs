@@ -141,11 +141,14 @@ pub enum USBSwitchState {
     Off,
 }
 impl USBSwitchState {
-    const CORE_TOP: Point = Point::new(6, 9);
-    const CORE_BOTTOM: Point = Point::new(6, 42);
-    const STROKE_THICKNESS: u32 = 2;
     const ARROW_DX: i32 = 4;
     const ARROW_DY: i32 = 4;
+    const STROKE_THICKNESS: u32 = 2;
+    const RIGHT_PADDING: i32 = 8;
+    pub const UI_X: i32 = (Self::ARROW_DX * 2) + Self::RIGHT_PADDING;
+    const CORE_TOP: Point = Point::new(Self::ARROW_DX, 9);
+    const CORE_BOTTOM: Point = Point::new(Self::ARROW_DX, 42);
+
     const ON_STYLE: PrimitiveStyle<BinaryColor> =
         PrimitiveStyle::with_stroke(BinaryColor::On, Self::STROKE_THICKNESS);
     const OFF_STYLE: PrimitiveStyle<BinaryColor> =
@@ -293,24 +296,37 @@ impl UISection {
     }
 
     const BORDER_RADIUS: Size = Size::new(4, 4);
-    pub const BORDER_ON_STYLE: PrimitiveStyle<BinaryColor> = PrimitiveStyleBuilder::new()
-        .stroke_color(BinaryColor::On)
-        .stroke_width(1)
-        .stroke_alignment(StrokeAlignment::Inside)
-        .build();
-    // PrimitiveStyle::with_stroke(BinaryColor::On, 1);
+    const BORDER_WIDTH: u32 = 1;
+    pub const BORDER_ON_STYLE: PrimitiveStyle<BinaryColor> =
+        PrimitiveStyle::with_stroke(BinaryColor::On, Self::BORDER_WIDTH);
     pub const BORDER_OFF_STYLE: PrimitiveStyle<BinaryColor> =
-        PrimitiveStyle::with_stroke(BinaryColor::Off, 1);
+        PrimitiveStyle::with_stroke(BinaryColor::Off, Self::BORDER_WIDTH);
+    const USB_POWER_X: i32 = USBSwitchState::UI_X;
+    const USB_POWER_SIZE: Size = Size::new(27, 64 / 2);
+    const MEETING_SIGN_SIZE: Size = Size::new(
+        128 - Self::USB_POWER_X as u32 - Self::USB_POWER_SIZE.width + Self::BORDER_WIDTH,
+        64,
+    );
+
     pub const USB_POWER_1_BORDER: RoundedRectangle = RoundedRectangle::with_equal_corners(
-        Rectangle::new(Point::new(14, 1), Size::new(27, 31)),
+        Rectangle::new(Point::new(Self::USB_POWER_X, 0), Self::USB_POWER_SIZE),
         Self::BORDER_RADIUS,
     );
     pub const USB_POWER_2_BORDER: RoundedRectangle = RoundedRectangle::with_equal_corners(
-        Rectangle::new(Point::new(14, 32), Size::new(27, 31)),
+        Rectangle::new(
+            Point::new(Self::USB_POWER_X, Self::USB_POWER_SIZE.height as i32),
+            Self::USB_POWER_SIZE,
+        ),
         Self::BORDER_RADIUS,
     );
     pub const MEETING_SIGN_BORDER: RoundedRectangle = RoundedRectangle::with_equal_corners(
-        Rectangle::new(Point::new(41, 1), Size::new(87, 63)),
+        Rectangle::new(
+            Point::new(
+                Self::USB_POWER_X + Self::USB_POWER_SIZE.width as i32 - Self::BORDER_WIDTH as i32,
+                0,
+            ),
+            Self::MEETING_SIGN_SIZE,
+        ),
         Self::BORDER_RADIUS,
     );
 }
