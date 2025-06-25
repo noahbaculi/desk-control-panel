@@ -42,6 +42,7 @@ use static_cell::StaticCell;
 
 extern crate alloc;
 
+// type StateMutex = Mutex<CriticalSectionRawMutex, ControlPanelState<DrawTarget<BinaryColor>>>;
 type StateMutex = Mutex<CriticalSectionRawMutex, ControlPanelState>;
 static STATE_MUTEX: StaticCell<StateMutex> = StaticCell::new();
 // static STATE_MUTEX: StateMutex = StateMutex::new(ControlPanelState {
@@ -91,6 +92,28 @@ async fn main(spawner: Spawner) {
         InputConfig::default().with_pull(Pull::Down),
     );
 
+    // Initialize and configure I2C
+    let i2c = I2c::new(
+        peripherals.I2C0,
+        esp_hal::i2c::master::Config::default().with_frequency(Rate::from_khz(400)),
+    )
+    .unwrap()
+    .with_sda(peripherals.GPIO0)
+    .with_scl(peripherals.GPIO1);
+
+    let interface = I2CDisplayInterface::new(i2c);
+    let mut display = Ssd1306::new(
+        interface,
+        ssd1306::size::DisplaySize128x64,
+        ssd1306::prelude::DisplayRotation::Rotate0,
+    )
+    .into_buffered_graphics_mode();
+    display.init().unwrap();
+
+    // Clear the display once at startup
+    display.clear(BinaryColor::Off).unwrap();
+    display.flush().unwrap();
+
     let control_panel_state = STATE_MUTEX.init(StateMutex::new(ControlPanelState {
         usb_switch: USBSwitch {
             led_a: usb_switch_led_a,
@@ -101,7 +124,9 @@ async fn main(spawner: Spawner) {
         meeting_sign_power: meeting_sign_power,
         ui_selection_mode: UISelectionMode::Menu,
         ui_section: UISection::MeetingSign,
+        display: display,
     }));
+
     spawner
         .spawn(monitor_meeting_sign_sense(meeting_sign_sense))
         .ok();
@@ -140,52 +165,30 @@ async fn main(spawner: Spawner) {
         ))
         .ok();
 
-    // Initialize and configure I2C
-    let i2c = I2c::new(
-        peripherals.I2C0,
-        esp_hal::i2c::master::Config::default().with_frequency(Rate::from_khz(400)),
-    )
-    .unwrap()
-    .with_sda(peripherals.GPIO0)
-    .with_scl(peripherals.GPIO1);
-
-    let interface = I2CDisplayInterface::new(i2c);
-    let mut display = Ssd1306::new(
-        interface,
-        ssd1306::size::DisplaySize128x64,
-        ssd1306::prelude::DisplayRotation::Rotate0,
-    )
-    .into_buffered_graphics_mode();
-    display.init().unwrap();
-
-    // Clear the display once at startup
-    display.clear(BinaryColor::Off).unwrap();
-    display.flush().unwrap();
-
-    let mut ticker = Ticker::every(Duration::from_millis(100));
-
-    // Main loop
-    loop {
-        {
-            // Draw USB switch state
-            control_panel_state
-                .lock()
-                .await
-                .usb_switch
-                .draw(&mut display)
-                .unwrap();
-        }
-        {
-            control_panel_state
-                .lock()
-                .await
-                .draw_ui(&mut display)
-                .unwrap();
-        }
-
-        display.flush().unwrap();
-        ticker.next().await;
-    }
+    // let mut ticker = Ticker::every(Duration::from_millis(100));
+    //
+    // // Main loop
+    // loop {
+    //     {
+    //         // Draw USB switch state
+    //         control_panel_state
+    //             .lock()
+    //             .await
+    //             .usb_switch
+    //             .draw(&mut display)
+    //             .unwrap();
+    //     }
+    //     {
+    //         control_panel_state
+    //             .lock()
+    //             .await
+    //             .draw_ui(&mut display)
+    //             .unwrap();
+    //     }
+    //
+    //     display.flush().unwrap();
+    //     ticker.next().await;
+    // }
 }
 
 #[embassy_executor::task]
@@ -223,7 +226,7 @@ async fn monitor_rotary_encoder_rotation(
             Direction::None => {}
         }
 
-        Timer::after(Duration::from_millis(1)).await;
+        Timer::after(Duration::from_millis(3)).await;
     }
 }
 

@@ -1,15 +1,27 @@
 use embedded_graphics::{
     pixelcolor::BinaryColor,
-    prelude::{DrawTarget, PixelColor, Point, Primitive, Size},
+    prelude::{DrawTarget, Point, Size},
     primitives::{
         Line, Polyline, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle,
         StrokeAlignment, StyledDrawable, Triangle,
     },
     Drawable,
 };
-use esp_hal::gpio::{Input, Level, Output};
+use esp_hal::{
+    gpio::{Input, Level, Output},
+    i2c::master::I2c,
+    Blocking,
+};
+use ssd1306::{
+    mode::BufferedGraphicsMode, prelude::I2CInterface, size::DisplaySize128x64, Ssd1306,
+};
 
-#[derive(Debug)]
+type DisplayType = Ssd1306<
+    I2CInterface<I2c<'static, Blocking>>,
+    DisplaySize128x64,
+    BufferedGraphicsMode<DisplaySize128x64>,
+>;
+// #[derive(Debug)]
 pub struct ControlPanelState {
     pub usb_switch: USBSwitch,
     pub usb_power_1: Output<'static>,
@@ -17,6 +29,7 @@ pub struct ControlPanelState {
     pub meeting_sign_power: Output<'static>,
     pub ui_selection_mode: UISelectionMode,
     pub ui_section: UISection,
+    pub display: DisplayType,
 }
 pub enum MovementDirection {
     Clockwise,
@@ -30,6 +43,7 @@ impl ControlPanelState {
                     MovementDirection::Clockwise => self.ui_section = self.ui_section.next(),
                     MovementDirection::CounterClockwise => self.ui_section = self.ui_section.prev(),
                 };
+                self.draw_border_ui().unwrap();
             }
             UISelectionMode::Selected => match self.ui_section {
                 UISection::USBPower1 => self.usb_power_1.toggle(),
@@ -40,12 +54,12 @@ impl ControlPanelState {
                 },
             },
         };
+
+        self.display.flush().unwrap();
     }
 
-    fn draw_border_ui<D>(&self, target: &mut D) -> Result<(), D::Error>
-    where
-        D: DrawTarget<Color = BinaryColor>,
-    {
+    fn draw_border_ui(&mut self) -> Result<(), <DisplayType as DrawTarget>::Error> {
+        let target = &mut self.display;
         match self.ui_section {
             UISection::USBPower1 => {
                 UISection::MEETING_SIGN_BORDER.draw_styled(&UISection::BORDER_OFF_STYLE, target)?;
@@ -67,11 +81,8 @@ impl ControlPanelState {
         Ok(())
     }
 
-    pub fn draw_ui<D>(&self, target: &mut D) -> Result<(), D::Error>
-    where
-        D: DrawTarget<Color = BinaryColor>,
-    {
-        self.draw_border_ui(target)?;
+    pub fn draw_ui(&mut self) -> Result<(), <DisplayType as DrawTarget>::Error> {
+        self.draw_border_ui()?;
         Ok(())
     }
 }
