@@ -9,11 +9,12 @@
 
 use desk_control_panel::control_panel::state::{
     ControlPanelState, MeetingSignState, MovementDirection, UISection, UISelectionMode,
-    USBPowerState, USBSwitch, USBSwitchOutput, USBSwitchState,
+    USBPowerState, USBSwitchOutput, USBSwitchState,
 };
 use desk_control_panel::meeting_duration::MeetingDuration;
 use desk_control_panel::meeting_instruction::{self, MeetingSignInstruction};
 use embassy_executor::Spawner;
+use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Ticker, Timer};
@@ -73,15 +74,6 @@ async fn main(spawner: Spawner) {
 
     info!("Embassy initialized!");
 
-    let usb_switch_led_a = Input::new(
-        peripherals.GPIO20,
-        InputConfig::default().with_pull(Pull::Down),
-    );
-    let usb_switch_led_b = Input::new(
-        peripherals.GPIO21,
-        InputConfig::default().with_pull(Pull::Down),
-    );
-
     let usb_power_1 = Output::new(peripherals.GPIO9, Level::Low, OutputConfig::default());
     let usb_power_2 = Output::new(peripherals.GPIO10, Level::Low, OutputConfig::default());
 
@@ -115,21 +107,39 @@ async fn main(spawner: Spawner) {
     display.flush().unwrap();
 
     let control_panel_state = STATE_MUTEX.init(StateMutex::new(ControlPanelState {
-        usb_switch: USBSwitch {
-            led_a: usb_switch_led_a,
-            led_b: usb_switch_led_b,
-        },
-        usb_power_1: usb_power_1,
-        usb_power_2: usb_power_2,
-        meeting_sign_power: meeting_sign_power,
+        usb_switch_state: USBSwitchState::Off,
+        usb_power_1,
+        usb_power_2,
+        meeting_sign_power,
         ui_selection_mode: UISelectionMode::Menu,
         ui_section: UISection::MeetingSign,
-        display: display,
+        display,
     }));
+    control_panel_state.lock().await.draw_ui().unwrap();
 
     spawner
-        .spawn(monitor_meeting_sign_sense(meeting_sign_sense))
+        .spawn(monitor_meeting_sign_sense(
+            meeting_sign_sense,
+            control_panel_state,
+        ))
         .ok();
+
+    let usb_switch_led_a = Input::new(
+        peripherals.GPIO20,
+        InputConfig::default().with_pull(Pull::Down),
+    );
+    let usb_switch_led_b = Input::new(
+        peripherals.GPIO21,
+        InputConfig::default().with_pull(Pull::Down),
+    );
+    spawner
+        .spawn(monitor_usb_switch_leds(
+            usb_switch_led_a,
+            usb_switch_led_b,
+            control_panel_state,
+        ))
+        .ok();
+
     let meeting_sign_uart_pin = peripherals.GPIO7;
     let meeting_sign_uart_config = Config::default().with_rx(
         RxConfig::default().with_fifo_full_threshold(meeting_instruction::READ_BUF_SIZE as u16),
@@ -206,22 +216,18 @@ async fn monitor_rotary_encoder_rotation(
             Direction::Clockwise => {
                 counter += 1;
                 info!("Rotary encoder {:?}! Counter = {}", direction, counter);
-                {
-                    control_panel_state
-                        .lock()
-                        .await
-                        .rotary_encoder_rotate(MovementDirection::Clockwise);
-                }
+                control_panel_state
+                    .lock()
+                    .await
+                    .rotary_encoder_rotate(MovementDirection::Clockwise);
             }
             Direction::CounterClockwise => {
                 counter -= 1;
                 info!("Rotary encoder {:?}! Counter = {}", direction, counter);
-                {
-                    control_panel_state
-                        .lock()
-                        .await
-                        .rotary_encoder_rotate(MovementDirection::CounterClockwise);
-                }
+                control_panel_state
+                    .lock()
+                    .await
+                    .rotary_encoder_rotate(MovementDirection::CounterClockwise);
             }
             Direction::None => {}
         }
@@ -247,7 +253,7 @@ async fn monitor_rotary_encoder_button(mut button: Input<'static>) {
 #[embassy_executor::task]
 async fn monitor_meeting_sign_sense(
     mut digital_input: Input<'static>,
-    // control_panel_state: &'static StateMutex,
+    control_panel_state: &'static StateMutex,
 ) {
     debug!("Starting monitor_meeting_sign_sense task");
     loop {
@@ -255,14 +261,41 @@ async fn monitor_meeting_sign_sense(
         // Debounce the change
         Timer::after(Duration::from_millis(100)).await;
 
-        match digital_input.level() {
-            Level::High => {
-                info!("Meeting sign sense is HIGH!");
-            }
-            Level::Low => {
-                info!("Meeting sign sense is LOW!");
-            }
-        }
+        info!("Meeting Sign sense changed to {:?}", digital_input.level());
+
+        // control_panel_state
+        //     .lock()
+        //     .await
+        //     .draw_usb_switch_ui()
+        //     .unwrap();
+    }
+}
+
+#[embassy_executor::task]
+async fn monitor_usb_switch_leds(
+    mut led_a: Input<'static>,
+    mut led_b: Input<'static>,
+    control_panel_state: &'static StateMutex,
+) {
+    debug!("Starting monitor_usb_switch_leds task");
+    loop {
+        select(led_a.wait_for_any_edge(), led_b.wait_for_any_edge()).await;
+
+        // Debounce the change
+        Timer::after(Duration::from_millis(100)).await;
+
+        let usb_switch_state = match (led_a.level(), led_b.level()) {
+            (Level::Low, Level::Low) | (Level::High, Level::High) => USBSwitchState::Off,
+            (Level::High, Level::Low) => USBSwitchState::On(USBSwitchOutput::A),
+            (Level::Low, Level::High) => USBSwitchState::On(USBSwitchOutput::B),
+        };
+        info!("USB Switch leds sense changed to {:?}", &usb_switch_state);
+
+        control_panel_state
+            .lock()
+            .await
+            .update_usb_switch_state(usb_switch_state)
+            .unwrap();
     }
 }
 

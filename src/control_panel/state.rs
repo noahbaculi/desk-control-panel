@@ -21,9 +21,8 @@ type DisplayType = Ssd1306<
     DisplaySize128x64,
     BufferedGraphicsMode<DisplaySize128x64>,
 >;
-// #[derive(Debug)]
 pub struct ControlPanelState {
-    pub usb_switch: USBSwitch,
+    pub usb_switch_state: USBSwitchState,
     pub usb_power_1: Output<'static>,
     pub usb_power_2: Output<'static>,
     pub meeting_sign_power: Output<'static>,
@@ -31,6 +30,7 @@ pub struct ControlPanelState {
     pub ui_section: UISection,
     pub display: DisplayType,
 }
+
 pub enum MovementDirection {
     Clockwise,
     CounterClockwise,
@@ -81,18 +81,30 @@ impl ControlPanelState {
         Ok(())
     }
 
+    pub fn update_usb_switch_state(
+        &mut self,
+        usb_switch_state: USBSwitchState,
+    ) -> Result<(), <DisplayType as DrawTarget>::Error> {
+        self.usb_switch_state = usb_switch_state;
+        self.usb_switch_state.draw(&mut self.display)?;
+        self.display.flush()?;
+        Ok(())
+    }
+
     pub fn draw_ui(&mut self) -> Result<(), <DisplayType as DrawTarget>::Error> {
         self.draw_border_ui()?;
+        self.usb_switch_state.draw(&mut self.display)?;
+        self.display.flush()?;
         Ok(())
     }
 }
 
 #[derive(Debug)]
-pub struct USBSwitch {
-    pub led_a: Input<'static>,
-    pub led_b: Input<'static>,
+pub enum USBSwitchState {
+    On(USBSwitchOutput),
+    Off,
 }
-impl USBSwitch {
+impl USBSwitchState {
     const CORE_TOP: Point = Point::new(6, 9);
     const CORE_BOTTOM: Point = Point::new(6, 42);
     const STROKE_THICKNESS: u32 = 2;
@@ -142,7 +154,7 @@ impl USBSwitch {
         ),
     );
 }
-impl Drawable for USBSwitch {
+impl Drawable for USBSwitchState {
     type Color = BinaryColor;
     type Output = ();
 
@@ -150,8 +162,8 @@ impl Drawable for USBSwitch {
     where
         D: DrawTarget<Color = BinaryColor>,
     {
-        match (self.led_a.level(), self.led_b.level()) {
-            (Level::Low, Level::Low) | (Level::High, Level::High) => {
+        match self {
+            Self::Off => {
                 Self::CORE_LINE.draw_styled(&Self::OFF_STYLE, target)?;
                 Polyline::new(&Self::USB_A_POINTS).draw_styled(&Self::OFF_STYLE, target)?;
                 Polyline::new(&Self::USB_B_POINTS).draw_styled(&Self::OFF_STYLE, target)?;
@@ -159,7 +171,7 @@ impl Drawable for USBSwitch {
                 Self::ERROR_GRAPHIC
                     .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::On, 1), target)?;
             }
-            (Level::High, Level::Low) => {
+            Self::On(USBSwitchOutput::A) => {
                 Self::ERROR_GRAPHIC
                     .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::Off, 1), target)?;
                 Polyline::new(&Self::USB_B_POINTS).draw_styled(&Self::OFF_STYLE, target)?;
@@ -167,7 +179,7 @@ impl Drawable for USBSwitch {
                 Self::CORE_LINE.draw_styled(&Self::ON_STYLE, target)?;
                 Polyline::new(&Self::USB_A_POINTS).draw_styled(&Self::ON_STYLE, target)?;
             }
-            (Level::Low, Level::High) => {
+            Self::On(USBSwitchOutput::B) => {
                 Self::ERROR_GRAPHIC
                     .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::Off, 1), target)?;
                 Polyline::new(&Self::USB_A_POINTS).draw_styled(&Self::OFF_STYLE, target)?;
@@ -178,13 +190,6 @@ impl Drawable for USBSwitch {
         }
         Ok(())
     }
-}
-
-#[derive(Debug)]
-pub enum USBSwitchState {
-    Output(USBSwitchOutput),
-    Off,
-    Error,
 }
 
 #[derive(Debug)]
