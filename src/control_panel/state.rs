@@ -1,7 +1,7 @@
 use embedded_graphics::{
     pixelcolor::BinaryColor,
     prelude::{DrawTarget, PixelColor, Point, Primitive},
-    primitives::{Line, Polyline, PrimitiveStyle},
+    primitives::{Line, Polyline, PrimitiveStyle, Triangle},
     Drawable,
 };
 use esp_hal::gpio::{Input, Level, Output};
@@ -42,27 +42,16 @@ pub struct USBSwitch {
     pub led_a: Input<'static>,
     pub led_b: Input<'static>,
 }
-// impl USBSwitch {
-//     pub fn draw_ui(&self) -> {
-//         if self.led_a.is_high() && self.led_b.is_high() {
-//             USBSwitchState::Off
-//         } else if self.led_a.is_high() {
-//             USBSwitchState::Output(USBSwitchOutput::A)
-//         } else if self.led_b.is_high() {
-//             USBSwitchState::Output(USBSwitchOutput::B)
-//         } else {
-//             USBSwitchState::Error
-//         }
-//     }
-// }
 impl USBSwitch {
     const CORE_TOP: Point = Point::new(6, 9);
     const CORE_BOTTOM: Point = Point::new(6, 42);
     const USB_SWITCH_THICKNESS: u32 = 2;
     const ARROW_DX: i32 = 4;
     const ARROW_DY: i32 = 4;
-    const USB_SWITCH_STYLE: PrimitiveStyle<BinaryColor> =
+    const ON_STYLE: PrimitiveStyle<BinaryColor> =
         PrimitiveStyle::with_stroke(BinaryColor::On, Self::USB_SWITCH_THICKNESS);
+    const OFF_STYLE: PrimitiveStyle<BinaryColor> =
+        PrimitiveStyle::with_stroke(BinaryColor::Off, Self::USB_SWITCH_THICKNESS);
 
     const USB_A_POINTS: [Point; 4] = [
         Point::new(
@@ -88,6 +77,20 @@ impl USBSwitch {
             Self::CORE_BOTTOM.y - Self::ARROW_DY,
         ),
     ];
+    const CORE_LINE: Line = Line::new(Self::CORE_TOP, Self::CORE_BOTTOM);
+
+    const ERROR_GRAPHIC_TOP_MIDDLE: Point = Point::new(Self::CORE_TOP.x, 30);
+    const ERROR_GRAPHIC: Triangle = Triangle::new(
+        Self::ERROR_GRAPHIC_TOP_MIDDLE,
+        Point::new(
+            Self::ERROR_GRAPHIC_TOP_MIDDLE.x - Self::ARROW_DX,
+            Self::ERROR_GRAPHIC_TOP_MIDDLE.y + 6,
+        ),
+        Point::new(
+            Self::ERROR_GRAPHIC_TOP_MIDDLE.x + Self::ARROW_DX,
+            Self::ERROR_GRAPHIC_TOP_MIDDLE.y + 6,
+        ),
+    );
 }
 impl Drawable for USBSwitch {
     type Color = BinaryColor;
@@ -97,21 +100,47 @@ impl Drawable for USBSwitch {
     where
         D: DrawTarget<Color = BinaryColor>,
     {
-        Line::new(Self::CORE_TOP, Self::CORE_BOTTOM)
-            .into_styled(Self::USB_SWITCH_STYLE)
-            .draw(target)?;
-
-        match self.led_a.level() {
-            Level::High => {
+        match (self.led_a.level(), self.led_b.level()) {
+            (Level::Low, Level::Low) => {
+                Self::CORE_LINE.into_styled(Self::OFF_STYLE).draw(target)?;
                 Polyline::new(&Self::USB_A_POINTS)
-                    .into_styled(Self::USB_SWITCH_STYLE)
+                    .into_styled(Self::OFF_STYLE)
                     .draw(target)?;
-            }
-            Level::Low => {
                 Polyline::new(&Self::USB_B_POINTS)
-                    .into_styled(Self::USB_SWITCH_STYLE)
+                    .into_styled(Self::OFF_STYLE)
+                    .draw(target)?;
+
+                Self::ERROR_GRAPHIC
+                    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
                     .draw(target)?;
             }
+            (Level::High, Level::Low) => {
+                Self::ERROR_GRAPHIC
+                    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::Off, 1))
+                    .draw(target)?;
+                Polyline::new(&Self::USB_B_POINTS)
+                    .into_styled(Self::OFF_STYLE)
+                    .draw(target)?;
+
+                Self::CORE_LINE.into_styled(Self::ON_STYLE).draw(target)?;
+                Polyline::new(&Self::USB_A_POINTS)
+                    .into_styled(Self::ON_STYLE)
+                    .draw(target)?;
+            }
+            (Level::Low, Level::High) => {
+                Self::ERROR_GRAPHIC
+                    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::Off, 1))
+                    .draw(target)?;
+                Polyline::new(&Self::USB_A_POINTS)
+                    .into_styled(Self::OFF_STYLE)
+                    .draw(target)?;
+
+                Self::CORE_LINE.into_styled(Self::ON_STYLE).draw(target)?;
+                Polyline::new(&Self::USB_B_POINTS)
+                    .into_styled(Self::ON_STYLE)
+                    .draw(target)?;
+            }
+            (Level::High, Level::High) => todo!(),
         }
         Ok(())
     }
