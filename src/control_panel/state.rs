@@ -1,11 +1,10 @@
 use embedded_graphics::{
+    mono_font::{ascii, MonoTextStyle},
     pixelcolor::BinaryColor,
-    prelude::{DrawTarget, Point, PointsIter, Primitive, Size},
-    primitives::{
-        Line, Polyline, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle,
-        StrokeAlignment, StyledDrawable, Triangle,
-    },
-    Drawable, Pixel,
+    prelude::{DrawTarget, Point, Primitive, Size},
+    primitives::{Line, Polyline, PrimitiveStyle, Rectangle, RoundedRectangle, StyledDrawable},
+    text::{Alignment, Baseline, Text, TextStyleBuilder},
+    Drawable,
 };
 use esp_hal::{
     gpio::{Input, Level, Output},
@@ -46,8 +45,18 @@ impl ControlPanelState {
                 self.draw_border_ui().unwrap();
             }
             UISelectionMode::Selected => match self.ui_section {
-                UISection::USBPower1 => self.usb_power_1.toggle(),
-                UISection::USBPower2 => self.usb_power_2.toggle(),
+                UISection::USBPower1 => {
+                    self.usb_power_1.toggle();
+                    USBPowerMosfet::One
+                        .draw(&mut self.display, self.usb_power_1.output_level())
+                        .unwrap();
+                }
+                UISection::USBPower2 => {
+                    self.usb_power_2.toggle();
+                    USBPowerMosfet::Two
+                        .draw(&mut self.display, self.usb_power_2.output_level())
+                        .unwrap();
+                }
                 UISection::MeetingSign => match direction {
                     MovementDirection::Clockwise => todo!(),
                     MovementDirection::CounterClockwise => todo!(),
@@ -127,9 +136,12 @@ impl ControlPanelState {
         Ok(())
     }
 
-    pub fn draw_ui(&mut self) -> Result<(), <DisplayType as DrawTarget>::Error> {
+    pub fn draw_entire_ui(&mut self) -> Result<(), <DisplayType as DrawTarget>::Error> {
         self.draw_border_ui()?;
-        self.usb_switch_state.draw(&mut self.display)?;
+        self.usb_switch_state.draw_entire_ui(&mut self.display)?;
+        USBPowerMosfet::One.draw(&mut self.display, self.usb_power_1.output_level())?;
+        USBPowerMosfet::Two.draw(&mut self.display, self.usb_power_2.output_level())?;
+
         self.display.flush()?;
         Ok(())
     }
@@ -145,9 +157,10 @@ impl USBSwitchState {
     const ARROW_DY: i32 = 4;
     const STROKE_THICKNESS: u32 = 2;
     const RIGHT_PADDING: i32 = 8;
+    const TOP_PADDING: i32 = 5;
     pub const UI_X: i32 = (Self::ARROW_DX * 2) + Self::RIGHT_PADDING;
-    const CORE_TOP: Point = Point::new(Self::ARROW_DX, 9);
-    const CORE_BOTTOM: Point = Point::new(Self::ARROW_DX, 42);
+    const CORE_TOP: Point = Point::new(Self::ARROW_DX, Self::TOP_PADDING);
+    const CORE_BOTTOM: Point = Point::new(Self::ARROW_DX, 64 - Self::TOP_PADDING);
 
     const ON_STYLE: PrimitiveStyle<BinaryColor> =
         PrimitiveStyle::with_stroke(BinaryColor::On, Self::STROKE_THICKNESS);
@@ -178,20 +191,7 @@ impl USBSwitchState {
             Self::CORE_BOTTOM.y - Self::ARROW_DY,
         ),
     ];
-    const CORE_LINE: Line = Line::new(Self::CORE_TOP, Self::CORE_BOTTOM);
-
-    const ERROR_GRAPHIC_TOP_MIDDLE: Point = Point::new(Self::CORE_TOP.x, 30);
-    const ERROR_GRAPHIC: Triangle = Triangle::new(
-        Self::ERROR_GRAPHIC_TOP_MIDDLE,
-        Point::new(
-            Self::ERROR_GRAPHIC_TOP_MIDDLE.x - Self::ARROW_DX,
-            Self::ERROR_GRAPHIC_TOP_MIDDLE.y + 6,
-        ),
-        Point::new(
-            Self::ERROR_GRAPHIC_TOP_MIDDLE.x + Self::ARROW_DX,
-            Self::ERROR_GRAPHIC_TOP_MIDDLE.y + 6,
-        ),
-    );
+    const ERROR_GRAPHIC: Line = Line::new(Self::CORE_TOP, Self::CORE_BOTTOM);
 
     pub fn from_leds(a: &Input<'static>, b: &Input<'static>) -> Self {
         match (a.level(), b.level()) {
@@ -199,6 +199,52 @@ impl USBSwitchState {
             (Level::High, Level::Low) => Self::On(USBSwitchOutput::A),
             (Level::Low, Level::High) => Self::On(USBSwitchOutput::B),
         }
+    }
+
+    pub fn draw_entire_ui<D: DrawTarget<Color = BinaryColor>>(
+        &self,
+        target: &mut D,
+    ) -> Result<(), D::Error> {
+        let font = ascii::FONT_7X13;
+        let style = MonoTextStyle::new(&font, BinaryColor::On);
+        let center_aligned = TextStyleBuilder::new()
+            .alignment(Alignment::Center)
+            .baseline(Baseline::Middle)
+            .build();
+
+        const Y_MIDDLE: i32 = 64 / 2;
+
+        Text::with_text_style(
+            "U",
+            Point::new(
+                Self::CORE_TOP.x,
+                Y_MIDDLE - font.character_size.height as i32,
+            ),
+            style,
+            center_aligned,
+        )
+        .draw(target)?;
+        Text::with_text_style(
+            "S",
+            Point::new(Self::CORE_TOP.x, Y_MIDDLE),
+            style,
+            center_aligned,
+        )
+        .draw(target)?;
+        Text::with_text_style(
+            "B",
+            Point::new(
+                Self::CORE_TOP.x,
+                Y_MIDDLE + font.character_size.height as i32,
+            ),
+            style,
+            center_aligned,
+        )
+        .draw(target)?;
+
+        self.draw(target)?;
+
+        Ok(())
     }
 }
 impl Drawable for USBSwitchState {
@@ -211,7 +257,6 @@ impl Drawable for USBSwitchState {
     {
         match self {
             Self::Off => {
-                Self::CORE_LINE.draw_styled(&Self::OFF_STYLE, target)?;
                 Polyline::new(&Self::USB_A_POINTS).draw_styled(&Self::OFF_STYLE, target)?;
                 Polyline::new(&Self::USB_B_POINTS).draw_styled(&Self::OFF_STYLE, target)?;
 
@@ -223,7 +268,6 @@ impl Drawable for USBSwitchState {
                     .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::Off, 1), target)?;
                 Polyline::new(&Self::USB_B_POINTS).draw_styled(&Self::OFF_STYLE, target)?;
 
-                Self::CORE_LINE.draw_styled(&Self::ON_STYLE, target)?;
                 Polyline::new(&Self::USB_A_POINTS).draw_styled(&Self::ON_STYLE, target)?;
             }
             Self::On(USBSwitchOutput::B) => {
@@ -231,10 +275,10 @@ impl Drawable for USBSwitchState {
                     .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::Off, 1), target)?;
                 Polyline::new(&Self::USB_A_POINTS).draw_styled(&Self::OFF_STYLE, target)?;
 
-                Self::CORE_LINE.draw_styled(&Self::ON_STYLE, target)?;
                 Polyline::new(&Self::USB_B_POINTS).draw_styled(&Self::ON_STYLE, target)?;
             }
         }
+
         Ok(())
     }
 }
@@ -253,9 +297,60 @@ pub enum MeetingSignState {
 }
 
 #[derive(Debug)]
-pub enum USBPowerState {
-    On,
-    Off,
+pub enum USBPowerMosfet {
+    One,
+    Two,
+}
+impl USBPowerMosfet {
+    const PADDING_X: u32 = 4;
+    const USB_POWER_SIZE: Size = Size::new(
+        UISection::USB_POWER_SIZE.width - (Self::PADDING_X * 2),
+        UISection::USB_POWER_SIZE.height - (Self::PADDING_X * 2) - 10,
+    );
+
+    const ON_STYLE: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_fill(BinaryColor::On);
+    const OFF_STYLE: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::On, 1);
+    const CLEAR_STYLE: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_fill(BinaryColor::Off);
+
+    const BORDER_RADIUS: Size = Size::new(3, 3);
+    const USB_POWER_1: RoundedRectangle = RoundedRectangle::with_equal_corners(
+        Rectangle::new(
+            Point::new(
+                UISection::USB_POWER_X + Self::PADDING_X as i32,
+                Self::PADDING_X as i32,
+            ),
+            Self::USB_POWER_SIZE,
+        ),
+        Self::BORDER_RADIUS,
+    );
+    const USB_POWER_2: RoundedRectangle = RoundedRectangle::with_equal_corners(
+        Rectangle::new(
+            Point::new(
+                UISection::USB_POWER_X + Self::PADDING_X as i32,
+                UISection::USB_POWER_SIZE.height as i32 + Self::PADDING_X as i32,
+            ),
+            Self::USB_POWER_SIZE,
+        ),
+        Self::BORDER_RADIUS,
+    );
+
+    pub fn draw<D: DrawTarget<Color = BinaryColor>>(
+        &self,
+        target: &mut D,
+        power: Level,
+    ) -> Result<(), D::Error> {
+        let shape = match self {
+            USBPowerMosfet::One => Self::USB_POWER_1,
+            USBPowerMosfet::Two => Self::USB_POWER_2,
+        };
+        let style = match power {
+            Level::High => Self::ON_STYLE,
+            Level::Low => Self::OFF_STYLE,
+        };
+        shape.draw_styled(&Self::CLEAR_STYLE, target)?;
+        shape.draw_styled(&style, target)?;
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -264,7 +359,7 @@ pub enum UISelectionMode {
     Selected,
 }
 impl UISelectionMode {
-    pub fn toggle(&mut self) {
+    pub const fn toggle(&mut self) {
         *self = match self {
             UISelectionMode::Menu => UISelectionMode::Selected,
             UISelectionMode::Selected => UISelectionMode::Menu,
@@ -279,7 +374,7 @@ pub enum UISection {
     USBPower1,
 }
 impl UISection {
-    pub fn next(&self) -> Self {
+    pub const fn next(&self) -> Self {
         match self {
             UISection::USBPower1 => UISection::MeetingSign,
             UISection::USBPower2 => UISection::USBPower1,
@@ -287,7 +382,7 @@ impl UISection {
         }
     }
 
-    pub fn prev(&self) -> Self {
+    pub const fn prev(&self) -> Self {
         match self {
             UISection::USBPower1 => UISection::USBPower2,
             UISection::USBPower2 => UISection::MeetingSign,
@@ -302,7 +397,7 @@ impl UISection {
     pub const BORDER_OFF_STYLE: PrimitiveStyle<BinaryColor> =
         PrimitiveStyle::with_stroke(BinaryColor::Off, Self::BORDER_WIDTH);
     const USB_POWER_X: i32 = USBSwitchState::UI_X;
-    const USB_POWER_SIZE: Size = Size::new(27, 64 / 2);
+    pub const USB_POWER_SIZE: Size = Size::new(27, 64 / 2);
     const MEETING_SIGN_SIZE: Size = Size::new(
         128 - Self::USB_POWER_X as u32 - Self::USB_POWER_SIZE.width + Self::BORDER_WIDTH,
         64,

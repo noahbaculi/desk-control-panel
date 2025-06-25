@@ -8,8 +8,7 @@
 #![allow(unused_imports)]
 
 use desk_control_panel::control_panel::state::{
-    ControlPanelState, MeetingSignState, MovementDirection, UISection, UISelectionMode,
-    USBPowerState, USBSwitchOutput, USBSwitchState,
+    ControlPanelState, MovementDirection, UISection, UISelectionMode, USBSwitchState,
 };
 use desk_control_panel::meeting_duration::MeetingDuration;
 use desk_control_panel::meeting_instruction::{self, MeetingSignInstruction};
@@ -43,17 +42,8 @@ use static_cell::StaticCell;
 
 extern crate alloc;
 
-// type StateMutex = Mutex<CriticalSectionRawMutex, ControlPanelState<DrawTarget<BinaryColor>>>;
 type StateMutex = Mutex<CriticalSectionRawMutex, ControlPanelState>;
 static STATE_MUTEX: StaticCell<StateMutex> = StaticCell::new();
-// static STATE_MUTEX: StateMutex = StateMutex::new(ControlPanelState {
-//     usb_switch: USBSwitchState::Off,
-//     meeting_sign: MeetingSignState::Off,
-//     usb_power_1: USBPowerState::Off,
-//     usb_power_2: USBPowerState::Off,
-//     ui_selection_mode: RotaryEncoderSelectionMode::Menu,
-//     ui_section: UISection::MeetingSign,
-// });
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -125,7 +115,7 @@ async fn main(spawner: Spawner) {
         ui_section: UISection::MeetingSign,
         display,
     }));
-    control_panel_state.lock().await.draw_ui().unwrap();
+    control_panel_state.lock().await.draw_entire_ui().unwrap();
 
     spawner
         .spawn(monitor_meeting_sign_sense(
@@ -256,8 +246,6 @@ async fn monitor_rotary_encoder_button(
         {
             let mut control_panel = control_panel_state.lock().await;
             control_panel.ui_selection_mode.toggle();
-            control_panel.draw_border_ui().unwrap();
-            control_panel.display.flush().unwrap();
         }
 
         // Debounce the button press
