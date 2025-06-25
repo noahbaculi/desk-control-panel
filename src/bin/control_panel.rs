@@ -156,7 +156,10 @@ async fn main(spawner: Spawner) {
         rotary_encoder_button.level()
     );
     spawner
-        .spawn(monitor_rotary_encoder_button(rotary_encoder_button))
+        .spawn(monitor_rotary_encoder_button(
+            rotary_encoder_button,
+            control_panel_state,
+        ))
         .ok();
 
     let rotary_encoder_clk = Input::new(
@@ -237,13 +240,23 @@ async fn monitor_rotary_encoder_rotation(
 }
 
 #[embassy_executor::task]
-async fn monitor_rotary_encoder_button(mut button: Input<'static>) {
+async fn monitor_rotary_encoder_button(
+    mut button: Input<'static>,
+    control_panel_state: &'static StateMutex,
+) {
     debug!("Starting monitor_rotary_encoder_button task");
     let mut counter = 0;
     loop {
         button.wait_for_falling_edge().await;
         counter += 1;
         info!("Rotary encoder button pressed! Counter = {}", counter);
+
+        {
+            let mut control_panel = control_panel_state.lock().await;
+            control_panel.ui_selection_mode.toggle();
+            control_panel.draw_border_ui().unwrap();
+            control_panel.display.flush().unwrap();
+        }
 
         // Debounce the button press
         Timer::after(Duration::from_millis(200)).await;

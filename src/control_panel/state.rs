@@ -1,11 +1,11 @@
 use embedded_graphics::{
     pixelcolor::BinaryColor,
-    prelude::{DrawTarget, Point, Size},
+    prelude::{DrawTarget, Point, PointsIter, Primitive, Size},
     primitives::{
         Line, Polyline, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle,
         StrokeAlignment, StyledDrawable, Triangle,
     },
-    Drawable,
+    Drawable, Pixel,
 };
 use esp_hal::{
     gpio::{Input, Level, Output},
@@ -58,23 +58,59 @@ impl ControlPanelState {
         self.display.flush().unwrap();
     }
 
-    fn draw_border_ui(&mut self) -> Result<(), <DisplayType as DrawTarget>::Error> {
+    pub fn rotary_encoder_press(&mut self) {
+        match self.ui_selection_mode {
+            UISelectionMode::Menu => {
+                self.ui_selection_mode = UISelectionMode::Selected;
+            }
+            UISelectionMode::Selected => {
+                self.ui_selection_mode = UISelectionMode::Menu;
+            }
+        };
+    }
+
+    fn draw_selected_border_ui(
+        &mut self,
+        rounded_rectangle: RoundedRectangle,
+    ) -> Result<(), <DisplayType as DrawTarget>::Error> {
+        let target = &mut self.display;
+
+        rounded_rectangle.draw_styled(&UISection::BORDER_OFF_STYLE, target)?;
+        match self.ui_selection_mode {
+            UISelectionMode::Menu => {
+                // Draw dashed border
+                for pixel in rounded_rectangle
+                    .into_styled(UISection::BORDER_ON_STYLE)
+                    .pixels()
+                    .step_by(3)
+                {
+                    pixel.draw(target)?;
+                }
+            }
+            UISelectionMode::Selected => {
+                rounded_rectangle.draw_styled(&UISection::BORDER_ON_STYLE, target)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn draw_border_ui(&mut self) -> Result<(), <DisplayType as DrawTarget>::Error> {
         let target = &mut self.display;
         match self.ui_section {
             UISection::USBPower1 => {
                 UISection::MEETING_SIGN_BORDER.draw_styled(&UISection::BORDER_OFF_STYLE, target)?;
                 UISection::USB_POWER_2_BORDER.draw_styled(&UISection::BORDER_OFF_STYLE, target)?;
-                UISection::USB_POWER_1_BORDER.draw_styled(&UISection::BORDER_ON_STYLE, target)?;
+                self.draw_selected_border_ui(UISection::USB_POWER_1_BORDER)?;
             }
             UISection::USBPower2 => {
                 UISection::MEETING_SIGN_BORDER.draw_styled(&UISection::BORDER_OFF_STYLE, target)?;
                 UISection::USB_POWER_1_BORDER.draw_styled(&UISection::BORDER_OFF_STYLE, target)?;
-                UISection::USB_POWER_2_BORDER.draw_styled(&UISection::BORDER_ON_STYLE, target)?;
+                self.draw_selected_border_ui(UISection::USB_POWER_2_BORDER)?;
             }
             UISection::MeetingSign => {
                 UISection::USB_POWER_1_BORDER.draw_styled(&UISection::BORDER_OFF_STYLE, target)?;
                 UISection::USB_POWER_2_BORDER.draw_styled(&UISection::BORDER_OFF_STYLE, target)?;
-                UISection::MEETING_SIGN_BORDER.draw_styled(&UISection::BORDER_ON_STYLE, target)?;
+                self.draw_selected_border_ui(UISection::MEETING_SIGN_BORDER)?;
             }
         };
 
