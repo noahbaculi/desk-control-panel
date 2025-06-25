@@ -1,7 +1,10 @@
 use embedded_graphics::{
     pixelcolor::BinaryColor,
-    prelude::{DrawTarget, PixelColor, Point, Primitive},
-    primitives::{Line, Polyline, PrimitiveStyle, Triangle},
+    prelude::{DrawTarget, PixelColor, Point, Primitive, Size},
+    primitives::{
+        Line, Polyline, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle,
+        StrokeAlignment, StyledDrawable, Triangle,
+    },
     Drawable,
 };
 use esp_hal::gpio::{Input, Level, Output};
@@ -23,7 +26,10 @@ impl ControlPanelState {
     pub fn rotary_encoder_rotate(&mut self, direction: MovementDirection) {
         match self.ui_selection_mode {
             UISelectionMode::Menu => {
-                self.ui_section = self.ui_section.next();
+                match direction {
+                    MovementDirection::Clockwise => self.ui_section = self.ui_section.next(),
+                    MovementDirection::CounterClockwise => self.ui_section = self.ui_section.prev(),
+                };
             }
             UISelectionMode::Selected => match self.ui_section {
                 UISection::USBPower1 => self.usb_power_1.toggle(),
@@ -35,6 +41,39 @@ impl ControlPanelState {
             },
         };
     }
+
+    fn draw_border_ui<D>(&self, target: &mut D) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = BinaryColor>,
+    {
+        match self.ui_section {
+            UISection::USBPower1 => {
+                UISection::MEETING_SIGN_BORDER.draw_styled(&UISection::BORDER_OFF_STYLE, target)?;
+                UISection::USB_POWER_2_BORDER.draw_styled(&UISection::BORDER_OFF_STYLE, target)?;
+                UISection::USB_POWER_1_BORDER.draw_styled(&UISection::BORDER_ON_STYLE, target)?;
+            }
+            UISection::USBPower2 => {
+                UISection::MEETING_SIGN_BORDER.draw_styled(&UISection::BORDER_OFF_STYLE, target)?;
+                UISection::USB_POWER_1_BORDER.draw_styled(&UISection::BORDER_OFF_STYLE, target)?;
+                UISection::USB_POWER_2_BORDER.draw_styled(&UISection::BORDER_ON_STYLE, target)?;
+            }
+            UISection::MeetingSign => {
+                UISection::USB_POWER_1_BORDER.draw_styled(&UISection::BORDER_OFF_STYLE, target)?;
+                UISection::USB_POWER_2_BORDER.draw_styled(&UISection::BORDER_OFF_STYLE, target)?;
+                UISection::MEETING_SIGN_BORDER.draw_styled(&UISection::BORDER_ON_STYLE, target)?;
+            }
+        };
+
+        Ok(())
+    }
+
+    pub fn draw_ui<D>(&self, target: &mut D) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = BinaryColor>,
+    {
+        self.draw_border_ui(target)?;
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -45,13 +84,13 @@ pub struct USBSwitch {
 impl USBSwitch {
     const CORE_TOP: Point = Point::new(6, 9);
     const CORE_BOTTOM: Point = Point::new(6, 42);
-    const USB_SWITCH_THICKNESS: u32 = 2;
+    const STROKE_THICKNESS: u32 = 2;
     const ARROW_DX: i32 = 4;
     const ARROW_DY: i32 = 4;
     const ON_STYLE: PrimitiveStyle<BinaryColor> =
-        PrimitiveStyle::with_stroke(BinaryColor::On, Self::USB_SWITCH_THICKNESS);
+        PrimitiveStyle::with_stroke(BinaryColor::On, Self::STROKE_THICKNESS);
     const OFF_STYLE: PrimitiveStyle<BinaryColor> =
-        PrimitiveStyle::with_stroke(BinaryColor::Off, Self::USB_SWITCH_THICKNESS);
+        PrimitiveStyle::with_stroke(BinaryColor::Off, Self::STROKE_THICKNESS);
 
     const USB_A_POINTS: [Point; 4] = [
         Point::new(
@@ -188,12 +227,20 @@ impl UISelectionMode {
 
 #[derive(Clone, Debug)]
 pub enum UISection {
-    USBPower1,
-    USBPower2,
     MeetingSign,
+    USBPower2,
+    USBPower1,
 }
 impl UISection {
     pub fn next(&self) -> Self {
+        match self {
+            UISection::USBPower1 => UISection::MeetingSign,
+            UISection::USBPower2 => UISection::USBPower1,
+            UISection::MeetingSign => UISection::USBPower2,
+        }
+    }
+
+    pub fn prev(&self) -> Self {
         match self {
             UISection::USBPower1 => UISection::USBPower2,
             UISection::USBPower2 => UISection::MeetingSign,
@@ -201,11 +248,25 @@ impl UISection {
         }
     }
 
-    pub fn prev(&self) -> Self {
-        match self {
-            UISection::USBPower1 => UISection::MeetingSign,
-            UISection::USBPower2 => UISection::USBPower1,
-            UISection::MeetingSign => UISection::USBPower2,
-        }
-    }
+    const BORDER_RADIUS: Size = Size::new(4, 4);
+    pub const BORDER_ON_STYLE: PrimitiveStyle<BinaryColor> = PrimitiveStyleBuilder::new()
+        .stroke_color(BinaryColor::On)
+        .stroke_width(1)
+        .stroke_alignment(StrokeAlignment::Inside)
+        .build();
+    // PrimitiveStyle::with_stroke(BinaryColor::On, 1);
+    pub const BORDER_OFF_STYLE: PrimitiveStyle<BinaryColor> =
+        PrimitiveStyle::with_stroke(BinaryColor::Off, 1);
+    pub const USB_POWER_1_BORDER: RoundedRectangle = RoundedRectangle::with_equal_corners(
+        Rectangle::new(Point::new(14, 1), Size::new(27, 31)),
+        Self::BORDER_RADIUS,
+    );
+    pub const USB_POWER_2_BORDER: RoundedRectangle = RoundedRectangle::with_equal_corners(
+        Rectangle::new(Point::new(14, 32), Size::new(27, 31)),
+        Self::BORDER_RADIUS,
+    );
+    pub const MEETING_SIGN_BORDER: RoundedRectangle = RoundedRectangle::with_equal_corners(
+        Rectangle::new(Point::new(41, 1), Size::new(87, 63)),
+        Self::BORDER_RADIUS,
+    );
 }

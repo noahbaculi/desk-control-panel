@@ -8,8 +8,8 @@
 #![allow(unused_imports)]
 
 use desk_control_panel::control_panel::state::{
-    ControlPanelState, MeetingSignState, UISection, UISelectionMode, USBPowerState, USBSwitch,
-    USBSwitchOutput, USBSwitchState,
+    ControlPanelState, MeetingSignState, MovementDirection, UISection, UISelectionMode,
+    USBPowerState, USBSwitch, USBSwitchOutput, USBSwitchState,
 };
 use desk_control_panel::meeting_duration::MeetingDuration;
 use desk_control_panel::meeting_instruction::{self, MeetingSignInstruction};
@@ -91,7 +91,7 @@ async fn main(spawner: Spawner) {
         InputConfig::default().with_pull(Pull::Down),
     );
 
-    let contorl_panel_state = STATE_MUTEX.init(StateMutex::new(ControlPanelState {
+    let control_panel_state = STATE_MUTEX.init(StateMutex::new(ControlPanelState {
         usb_switch: USBSwitch {
             led_a: usb_switch_led_a,
             led_b: usb_switch_led_b,
@@ -136,6 +136,7 @@ async fn main(spawner: Spawner) {
         .spawn(monitor_rotary_encoder_rotation(
             rotary_encoder_clk,
             rotary_encoder_dt,
+            control_panel_state,
         ))
         .ok();
 
@@ -161,17 +162,26 @@ async fn main(spawner: Spawner) {
     display.clear(BinaryColor::Off).unwrap();
     display.flush().unwrap();
 
-    let mut ticker = Ticker::every(Duration::from_millis(50));
+    let mut ticker = Ticker::every(Duration::from_millis(100));
 
     // Main loop
     loop {
-        // Draw USB switch state
-        contorl_panel_state
-            .lock()
-            .await
-            .usb_switch
-            .draw(&mut display)
-            .unwrap();
+        {
+            // Draw USB switch state
+            control_panel_state
+                .lock()
+                .await
+                .usb_switch
+                .draw(&mut display)
+                .unwrap();
+        }
+        {
+            control_panel_state
+                .lock()
+                .await
+                .draw_ui(&mut display)
+                .unwrap();
+        }
 
         display.flush().unwrap();
         ticker.next().await;
@@ -182,6 +192,7 @@ async fn main(spawner: Spawner) {
 async fn monitor_rotary_encoder_rotation(
     rotary_encoder_clk: Input<'static>,
     rotary_encoder_dt: Input<'static>,
+    control_panel_state: &'static StateMutex,
 ) {
     debug!("Starting monitor_rotary_encoder_rotation task");
     let mut rotary_encoder = Rotary::new(rotary_encoder_dt, rotary_encoder_clk);
@@ -192,10 +203,22 @@ async fn monitor_rotary_encoder_rotation(
             Direction::Clockwise => {
                 counter += 1;
                 info!("Rotary encoder {:?}! Counter = {}", direction, counter);
+                {
+                    control_panel_state
+                        .lock()
+                        .await
+                        .rotary_encoder_rotate(MovementDirection::Clockwise);
+                }
             }
             Direction::CounterClockwise => {
                 counter -= 1;
                 info!("Rotary encoder {:?}! Counter = {}", direction, counter);
+                {
+                    control_panel_state
+                        .lock()
+                        .await
+                        .rotary_encoder_rotate(MovementDirection::CounterClockwise);
+                }
             }
             Direction::None => {}
         }
