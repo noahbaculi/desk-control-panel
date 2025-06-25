@@ -106,8 +106,18 @@ async fn main(spawner: Spawner) {
     display.clear(BinaryColor::Off).unwrap();
     display.flush().unwrap();
 
+    let usb_switch_led_a = Input::new(
+        peripherals.GPIO20,
+        InputConfig::default().with_pull(Pull::Down),
+    );
+    let usb_switch_led_b = Input::new(
+        peripherals.GPIO21,
+        InputConfig::default().with_pull(Pull::Down),
+    );
+    let usb_switch_state = USBSwitchState::from_leds(&usb_switch_led_a, &usb_switch_led_b);
+
     let control_panel_state = STATE_MUTEX.init(StateMutex::new(ControlPanelState {
-        usb_switch_state: USBSwitchState::Off,
+        usb_switch_state,
         usb_power_1,
         usb_power_2,
         meeting_sign_power,
@@ -124,14 +134,6 @@ async fn main(spawner: Spawner) {
         ))
         .ok();
 
-    let usb_switch_led_a = Input::new(
-        peripherals.GPIO20,
-        InputConfig::default().with_pull(Pull::Down),
-    );
-    let usb_switch_led_b = Input::new(
-        peripherals.GPIO21,
-        InputConfig::default().with_pull(Pull::Down),
-    );
     spawner
         .spawn(monitor_usb_switch_leds(
             usb_switch_led_a,
@@ -297,12 +299,7 @@ async fn monitor_usb_switch_leds(
         // Debounce the change
         Timer::after(Duration::from_millis(100)).await;
 
-        let usb_switch_state = match (led_a.level(), led_b.level()) {
-            (Level::Low, Level::Low) | (Level::High, Level::High) => USBSwitchState::Off,
-            (Level::High, Level::Low) => USBSwitchState::On(USBSwitchOutput::A),
-            (Level::Low, Level::High) => USBSwitchState::On(USBSwitchOutput::B),
-        };
-        info!("USB Switch leds sense changed to {:?}", &usb_switch_state);
+        let usb_switch_state = USBSwitchState::from_leds(&led_a, &led_b);
 
         control_panel_state
             .lock()

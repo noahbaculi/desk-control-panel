@@ -189,6 +189,14 @@ impl USBSwitchState {
             Self::ERROR_GRAPHIC_TOP_MIDDLE.y + 6,
         ),
     );
+
+    pub fn from_leds(a: &Input<'static>, b: &Input<'static>) -> Self {
+        match (a.level(), b.level()) {
+            (Level::Low, Level::Low) | (Level::High, Level::High) => Self::Off,
+            (Level::High, Level::Low) => Self::On(USBSwitchOutput::A),
+            (Level::Low, Level::High) => Self::On(USBSwitchOutput::B),
+        }
+    }
 }
 impl Drawable for USBSwitchState {
     type Color = BinaryColor;
