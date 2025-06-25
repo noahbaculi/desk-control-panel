@@ -223,7 +223,7 @@ async fn monitor_rotary_encoder_rotation(
             Direction::None => {}
         }
 
-        Timer::after(Duration::from_millis(3)).await;
+        Timer::after(Duration::from_millis(1)).await;
     }
 }
 

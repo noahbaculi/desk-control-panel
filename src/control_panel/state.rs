@@ -140,46 +140,30 @@ impl Drawable for USBSwitch {
         D: DrawTarget<Color = BinaryColor>,
     {
         match (self.led_a.level(), self.led_b.level()) {
-            (Level::Low, Level::Low) => {
-                Self::CORE_LINE.into_styled(Self::OFF_STYLE).draw(target)?;
-                Polyline::new(&Self::USB_A_POINTS)
-                    .into_styled(Self::OFF_STYLE)
-                    .draw(target)?;
-                Polyline::new(&Self::USB_B_POINTS)
-                    .into_styled(Self::OFF_STYLE)
-                    .draw(target)?;
+            (Level::Low, Level::Low) | (Level::High, Level::High) => {
+                Self::CORE_LINE.draw_styled(&Self::OFF_STYLE, target)?;
+                Polyline::new(&Self::USB_A_POINTS).draw_styled(&Self::OFF_STYLE, target)?;
+                Polyline::new(&Self::USB_B_POINTS).draw_styled(&Self::OFF_STYLE, target)?;
 
                 Self::ERROR_GRAPHIC
-                    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-                    .draw(target)?;
+                    .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::On, 1), target)?;
             }
             (Level::High, Level::Low) => {
                 Self::ERROR_GRAPHIC
-                    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::Off, 1))
-                    .draw(target)?;
-                Polyline::new(&Self::USB_B_POINTS)
-                    .into_styled(Self::OFF_STYLE)
-                    .draw(target)?;
+                    .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::Off, 1), target)?;
+                Polyline::new(&Self::USB_B_POINTS).draw_styled(&Self::OFF_STYLE, target)?;
 
-                Self::CORE_LINE.into_styled(Self::ON_STYLE).draw(target)?;
-                Polyline::new(&Self::USB_A_POINTS)
-                    .into_styled(Self::ON_STYLE)
-                    .draw(target)?;
+                Self::CORE_LINE.draw_styled(&Self::ON_STYLE, target)?;
+                Polyline::new(&Self::USB_A_POINTS).draw_styled(&Self::ON_STYLE, target)?;
             }
             (Level::Low, Level::High) => {
                 Self::ERROR_GRAPHIC
-                    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::Off, 1))
-                    .draw(target)?;
-                Polyline::new(&Self::USB_A_POINTS)
-                    .into_styled(Self::OFF_STYLE)
-                    .draw(target)?;
+                    .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::Off, 1), target)?;
+                Polyline::new(&Self::USB_A_POINTS).draw_styled(&Self::OFF_STYLE, target)?;
 
-                Self::CORE_LINE.into_styled(Self::ON_STYLE).draw(target)?;
-                Polyline::new(&Self::USB_B_POINTS)
-                    .into_styled(Self::ON_STYLE)
-                    .draw(target)?;
+                Self::CORE_LINE.draw_styled(&Self::ON_STYLE, target)?;
+                Polyline::new(&Self::USB_B_POINTS).draw_styled(&Self::ON_STYLE, target)?;
             }
-            (Level::High, Level::High) => todo!(),
         }
         Ok(())
     }
