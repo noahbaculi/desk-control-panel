@@ -131,11 +131,11 @@ An [existing project](https://github.com/noahbaculi/embedded-meeting-sign) that 
 
 ## High Level Wiring Diagram
 
-![High Level Wiring Diagram](./assets/high_level_wiring_diagram.svg)
+![High Level Wiring Diagram](./assets/high_level_wiring_diagram.png)
 
 ## Back Module Distribution PCB Schematic
 
-![Back Module Distribution PCB Schematic](./assets/back_module_distribution_schematic.svg)
+![Back Module Distribution PCB Schematic](./assets/back_module_distribution_schematic.png)
 
 ## Firmware Development
 
