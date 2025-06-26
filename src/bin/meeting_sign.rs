@@ -15,6 +15,8 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::pubsub::{ImmediatePublisher, PubSubChannel, Subscriber};
 use embassy_time::{Duration, Instant, Timer};
+use esp_hal::gpio::RtcPin;
+use esp_hal::rtc_cntl::Rtc;
 use esp_hal::{
     clock::CpuClock,
     gpio::{AnyPin, Level, Output, OutputConfig},
@@ -27,17 +29,15 @@ use static_cell::StaticCell;
 
 const NUM_LEDS: usize = 9;
 const LED_PINS: [u8; NUM_LEDS] = [5, 6, 7, 8, 9, 10, 20, 21, 0];
-const BUILT_IN_TIMER_DURATION: Duration = Duration::from_secs(60 * 9); // 90 minutes
-const BUILT_IN_TIMER_UPDATE_INTERVAL: Duration = Duration::from_secs(60);
-
-extern crate alloc;
+const BUILT_IN_TIMER_DURATION: Duration = Duration::from_secs(60 * 1); // 90 minutes
+const BUILT_IN_TIMER_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
 // Global static for the panic pin
-static mut PANIC_PIN: Option<Output<'static>> = None;
+static mut STATUS_PIN: Option<Output<'static>> = None;
 
 type LEDsMutex = Mutex<CriticalSectionRawMutex, LEDs<'static>>;
 static LEDS: StaticCell<LEDsMutex> = StaticCell::new();
@@ -81,8 +81,7 @@ async fn main(spawner: Spawner) {
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
-
-    esp_alloc::heap_allocator!(size: 64 * 1024);
+    let mut rtc = esp_hal::rtc_cntl::Rtc::new(peripherals.LPWR);
 
     let timer0 = SystemTimer::new(peripherals.SYSTIMER);
     esp_hal_embassy::init(timer0.alarm0);
@@ -90,11 +89,11 @@ async fn main(spawner: Spawner) {
 
     let startup_instant = Instant::now();
 
-    // WARN: This panic pin needs to match the emergency hardcoded panic pin
-    let panic_pin = Output::new(peripherals.GPIO3, Level::High, OutputConfig::default());
+    // WARN: This status pin needs to match the emergency hardcoded panic pin
+    let status_pin = Output::new(peripherals.GPIO3, Level::High, OutputConfig::default());
     // Store the pin globally for panic handler access
     unsafe {
-        PANIC_PIN = Some(panic_pin);
+        STATUS_PIN = Some(status_pin);
     }
 
     // WARN: These LED pins need to match the emergency hardcoded LED pins
@@ -102,8 +101,8 @@ async fn main(spawner: Spawner) {
         peripherals.GPIO5.into(),
         peripherals.GPIO6.into(),
         peripherals.GPIO7.into(),
-        peripherals.GPIO8.into(),
-        peripherals.GPIO9.into(),
+        peripherals.GPIO8.into(), // TODO: Change to a non-strapping pin
+        peripherals.GPIO9.into(), // TODO: Change to a non-strapping pin
         peripherals.GPIO10.into(),
         peripherals.GPIO20.into(),
         peripherals.GPIO21.into(),
@@ -112,7 +111,9 @@ async fn main(spawner: Spawner) {
     let leds = LEDS.init(Mutex::new(LEDs::new(led_pins)));
 
     // Initialize the LEDs to display the built-in timer
-    leds.lock().await.display_builtin_timer(startup_instant);
+    leds.lock()
+        .await
+        .display_builtin_timer(&startup_instant, &mut rtc);
 
     let meeting_sign_state = MEETING_SIGN_STATE.init(MeetingSignStatePubSubChannel::new());
 
@@ -161,7 +162,9 @@ async fn main(spawner: Spawner) {
                     // Change timeout since we have not received UART commands
                     loop_timeout_duration = BUILT_IN_TIMER_UPDATE_INTERVAL;
 
-                    leds.lock().await.display_builtin_timer(startup_instant);
+                    leds.lock()
+                        .await
+                        .display_builtin_timer(&startup_instant, &mut rtc);
                 }
                 MeetingSignState::Uart(instruction) => {
                     info!("State changed to Uart.");
@@ -190,7 +193,9 @@ async fn main(spawner: Spawner) {
                 // leds.lock().await.set_pattern_array(&[
                 //     false, true, true, false, false, false, true, true, false,
                 // ]);
-                leds.lock().await.display_builtin_timer(startup_instant);
+                leds.lock()
+                    .await
+                    .display_builtin_timer(&startup_instant, &mut rtc);
             }
         }
     }
@@ -230,13 +235,24 @@ impl<'a> LEDs<'a> {
         }
     }
 
-    pub fn display_builtin_timer(&mut self, startup_instant: Instant) {
+    pub fn display_builtin_timer(&mut self, startup_instant: &Instant, rtc: &mut Rtc) {
         let on_duration = startup_instant.elapsed();
         if on_duration >= BUILT_IN_TIMER_DURATION {
             // If the timer has expired, turn off all LEDs
             for led in self.led_outs.iter_mut() {
                 led.set_low();
             }
+
+            // Set the status pin low
+            unsafe {
+                if let Some(ref mut pin) = STATUS_PIN {
+                    pin.set_low();
+                } else {
+                    emergency_gpio3_low();
+                }
+            }
+
+            rtc.sleep_deep(&[]);
         } else {
             // Calculate the portion of time elapsed
             debug!(
@@ -357,9 +373,9 @@ async fn uart_timeout_monitor(
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     // Disable interrupts to prevent further issues
     critical_section::with(|_| {
-        // Try to set the panic pin high
+        // Try to set the status pin low
         unsafe {
-            if let Some(ref mut pin) = PANIC_PIN {
+            if let Some(ref mut pin) = STATUS_PIN {
                 pin.set_low();
             } else {
                 emergency_gpio3_low();
