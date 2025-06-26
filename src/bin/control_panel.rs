@@ -16,7 +16,7 @@ use embassy_executor::Spawner;
 use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::{Duration, Instant, Ticker, Timer};
 use embedded_graphics::primitives::{Line, Polyline};
 use embedded_graphics::{
     pixelcolor::BinaryColor,
@@ -114,6 +114,7 @@ async fn main(spawner: Spawner) {
         ui_selection_mode: UISelectionMode::Menu,
         ui_section: UISection::MeetingSign,
         display,
+        meeting_sign_completion: None,
     }));
     control_panel_state.lock().await.draw_entire_ui().unwrap();
 
@@ -168,6 +169,10 @@ async fn main(spawner: Spawner) {
             rotary_encoder_dt,
             control_panel_state,
         ))
+        .ok();
+
+    spawner
+        .spawn(monitor_meeting_sign_timer(control_panel_state))
         .ok();
 }
 
@@ -268,6 +273,34 @@ async fn monitor_usb_switch_leds(
             .await
             .update_usb_switch_state(usb_switch_state)
             .unwrap();
+    }
+}
+
+#[embassy_executor::task]
+async fn monitor_meeting_sign_timer(control_panel_state: &'static StateMutex) {
+    debug!("Starting monitor_meeting_sign_timer task");
+    let mut ticker = Ticker::every(Duration::from_secs(1));
+    loop {
+        // let timer_completion = { control_panel_state.lock().await.meeting_sign_completion };
+        // match timer_completion {
+        //     Some(instant) => {
+        //         let now = Instant::now();
+        //         if now < instant {
+        //             info!("Meeting Sign timer is running");
+        //         } else {
+        //             info!("Meeting Sign timer has completed");
+        //             control_panel_state
+        //                 .lock()
+        //                 .await
+        //                 .update_meeting_sign_completion(None);
+        //         }
+        //     }
+        //     None => {
+        //         info!("Meeting Sign timer is not running");
+        //     }
+        // }
+
+        ticker.next().await;
     }
 }
 
