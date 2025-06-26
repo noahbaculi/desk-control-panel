@@ -13,7 +13,7 @@ A MCU like an ESP32-C3 enables a fancier interface with a 0.96" OLED screen.
 - Speaker channels (left and right)
 - 3 x USB power
 
-> The HDMI switches and the USB hub switch are existing standalone devices so these will be controlled by buttons directly with the ESP32 monitoring for observability. The USB power switches will be controlled directly by the ESP32.
+> The HDMI switches and the USB hub switch are existing standalone devices so these will be controlled by buttons directly without the MCU. The USB power switches will be controlled directly by the ESP32.
 
 #### HDMI Switch
 
@@ -37,6 +37,7 @@ When active, the LED has a 1.8V potential difference. However, relative to a sha
 | ON          | 1.8V        | 0V          | OFF         | 0V          | 0V          |
 | OFF         | 3.3V        | 3.3V        | ON          | 0V          | 1.8V        |
 
+> [!NOTE]
 > Due to lack of pins on the ESP32-C3, the state of the HDMI Switches will *not* be monitored by the ESP32-C3. The latching switches should be sufficient for state UI.
 
 #### USB Hub Switch
@@ -76,6 +77,7 @@ P_total = V_in × I_total
         = 0.833 mW
 ```
 
+> [!NOTE]
 > Since the USB hub switch is triggered with a momentary switch rather than a latching switch, the ESP32-C3 will monitor state for presentation to the user on the OLED screen. The monitored pins are `LED A Pin 1` and `LED B Pin 1`.
 
 #### Speaker Channels
@@ -83,6 +85,7 @@ P_total = V_in × I_total
 There is currently two toggle switches that are manually spliced into the 3.5mm audio cables from two computers to direct the output from each computer to the speaker left and right channels.
 This implementation will remain the same as this simple analog switching is working well.
 
+> [!NOTE]
 > The toggle switches are sufficient state UI and therefore does not require monitoring by the ESP32-C3.
 
 - [x] Refine design of enclosure
@@ -98,9 +101,9 @@ Control USB power using MOSFETs. Planned USB-powered peripherals include:
 - Pyle PAD43MXUBT Audio Mixer (500mA @ 5V)
 - Meeting Sign (200mA @ 5V)
 
-To be triggered by an ESP32, this should be accomplished with a _logic level_ P-Channel MOSFET. The MOSFET should be logic level in order to be driven by a 3.3V ESP32 directly. The IRLML6402 is widely available and cheaper but without features like short-circuit and thermal protection of a dedicated USB Switch IC.
+To be triggered by an MCU, this should be accomplished with a _logic level_ P-Channel MOSFET. The MOSFET should be logic level in order to be driven by a 3.3V ESP32 directly. The IRLML6402 is widely available and cheaper but without features like short-circuit and thermal protection of a dedicated USB Switch IC.
 
-> Using an N-Channel MOSFET is not ideal because the USB spec assumes GND is always connected and stable.
+Using an N-Channel MOSFET is not ideal because the USB spec assumes GND is always connected and stable.
 
 Using the P-Channel MOSFET should include
 
@@ -110,6 +113,7 @@ Using the P-Channel MOSFET should include
 ##### Meeting Sign
 
 An [existing project](https://github.com/noahbaculi/embedded-meeting-sign) that is USB-powered and utilizes an Arduino Nano to countdown a timer and indicate the remaining duration on a series of LEDs.
+The Meeting Sign will be powered via one of the USB Power MOSFETs controlled by the MCU.
 
 - [x] Rewrite firmware
     - [x] Use the ESP32-C3 instead of the Arduino Nano in order to use consistent `esp-hal` and `embassy` tooling
@@ -131,11 +135,11 @@ An [existing project](https://github.com/noahbaculi/embedded-meeting-sign) that 
 
 ## High Level Wiring Diagram
 
-![High Level Wiring Diagram](./assets/high_level_wiring_diagram.png)
+![High Level Wiring Diagram](./assets/high_level_wiring_diagram.svg)
 
 ## Back Module Distribution PCB Schematic
 
-![Back Module Distribution PCB Schematic](./assets/back_module_distribution_schematic.png)
+![Back Module Distribution PCB Schematic](./assets/back_module_distribution_schematic.svg)
 
 ## Firmware Development
 
