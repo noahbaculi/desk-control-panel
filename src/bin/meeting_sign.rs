@@ -27,7 +27,8 @@ use static_cell::StaticCell;
 
 const NUM_LEDS: usize = 9;
 const LED_PINS: [u8; NUM_LEDS] = [5, 6, 7, 8, 9, 10, 20, 21, 0];
-const DEFAULT_MAX_DURATION: Duration = Duration::from_secs(60 * 90); // 90 minutes
+const BUILT_IN_TIMER_DURATION: Duration = Duration::from_secs(60 * 9); // 90 minutes
+const BUILT_IN_TIMER_UPDATE_INTERVAL: Duration = Duration::from_secs(60);
 
 extern crate alloc;
 
@@ -87,6 +88,8 @@ async fn main(spawner: Spawner) {
     esp_hal_embassy::init(timer0.alarm0);
     info!("Embassy initialized!");
 
+    let startup_instant = Instant::now();
+
     // WARN: This panic pin needs to match the emergency hardcoded panic pin
     let panic_pin = Output::new(peripherals.GPIO3, Level::High, OutputConfig::default());
     // Store the pin globally for panic handler access
@@ -107,6 +110,9 @@ async fn main(spawner: Spawner) {
         peripherals.GPIO0.into(),
     ];
     let leds = LEDS.init(Mutex::new(LEDs::new(led_pins)));
+
+    // Initialize the LEDs to display the built-in timer
+    leds.lock().await.display_builtin_timer(startup_instant);
 
     let meeting_sign_state = MEETING_SIGN_STATE.init(MeetingSignStatePubSubChannel::new());
 
@@ -151,7 +157,11 @@ async fn main(spawner: Spawner) {
             Either::First(state) => match state {
                 MeetingSignState::NoUart => {
                     info!("State changed to NoUart.");
-                    leds.lock().await.set_ratio_low(ProgressRatio(u8::MAX / 2));
+
+                    // Change timeout since we have not received UART commands
+                    loop_timeout_duration = BUILT_IN_TIMER_UPDATE_INTERVAL;
+
+                    leds.lock().await.display_builtin_timer(startup_instant);
                 }
                 MeetingSignState::Uart(instruction) => {
                     info!("State changed to Uart.");
@@ -162,9 +172,10 @@ async fn main(spawner: Spawner) {
                         MeetingSignInstruction::Off => {
                             leds.lock().await.set_ratio_low(ProgressRatio(0))
                         }
-                        MeetingSignInstruction::Diagnostic => todo!(),
                     }
-                    leds.lock().await.set_ratio_low(ProgressRatio(u8::MAX));
+
+                    // Change timeout since we have received UART commands
+                    loop_timeout_duration = UART_COMMUNICATION_TIMEOUT;
                 }
             },
             Either::Second(_) => {
@@ -172,13 +183,14 @@ async fn main(spawner: Spawner) {
                     "No state change detected within {}s, displaying LEDs according to builtin timer...",
                     loop_timeout_duration.as_secs()
                 );
-                loop_timeout_duration = Duration::from_secs(60); // Increase the timeout now
 
-                leds.lock().await.set_pattern_array(&[
-                    false, true, true, false, false, false, true, true, false,
-                ]);
-                Timer::after(Duration::from_secs(1)).await;
-                leds.lock().await.display_builtin_timer();
+                // Change timeout since we have not received UART commands
+                loop_timeout_duration = BUILT_IN_TIMER_UPDATE_INTERVAL;
+
+                // leds.lock().await.set_pattern_array(&[
+                //     false, true, true, false, false, false, true, true, false,
+                // ]);
+                leds.lock().await.display_builtin_timer(startup_instant);
             }
         }
     }
@@ -218,17 +230,23 @@ impl<'a> LEDs<'a> {
         }
     }
 
-    pub fn display_builtin_timer(&mut self) {
-        let on_duration = Instant::now().elapsed();
-        if on_duration >= DEFAULT_MAX_DURATION {
+    pub fn display_builtin_timer(&mut self, startup_instant: Instant) {
+        let on_duration = startup_instant.elapsed();
+        if on_duration >= BUILT_IN_TIMER_DURATION {
             // If the timer has expired, turn off all LEDs
             for led in self.led_outs.iter_mut() {
                 led.set_low();
             }
         } else {
             // Calculate the portion of time elapsed
-            let ratio = ProgressRatio::from_durations(&on_duration, &DEFAULT_MAX_DURATION)
+            debug!(
+                "Calculating ratio = {}s / {}s",
+                on_duration.as_secs(),
+                BUILT_IN_TIMER_DURATION.as_secs()
+            );
+            let ratio = ProgressRatio::from_durations(&on_duration, &BUILT_IN_TIMER_DURATION)
                 .expect("Failed to calculate ratio from durations");
+            debug!("Setting LEDs based on ratio: {:?}", ratio);
             // Set LEDs based on the portion
             self.set_ratio_low(ratio);
         }

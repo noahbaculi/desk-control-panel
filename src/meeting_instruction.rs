@@ -57,7 +57,6 @@ impl ProgressRatio {
 pub enum MeetingSignInstruction {
     On(ProgressRatio),
     Off,
-    Diagnostic,
 }
 
 // Max postcard serialized size
