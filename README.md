@@ -4,7 +4,7 @@
 
 A control panel for under my desk that allows me to control my KVM as well as other peripherals.
 
-A MCU like an ESP32 enables a fancier interface with a 0.96" OLED screen.
+A MCU like an ESP32-C3 enables a fancier interface with a 0.96" OLED screen.
 
 ### Peripherals
 
@@ -36,6 +36,8 @@ When active, the LED has a 1.8V potential difference. However, relative to a sha
 | ----------- | ----------- | ----------- | ----------- | ----------- | ----------- |
 | ON          | 1.8V        | 0V          | OFF         | 0V          | 0V          |
 | OFF         | 3.3V        | 3.3V        | ON          | 0V          | 1.8V        |
+
+> Due to lack of pins on the ESP32-C3, the state of the HDMI Switches will *not* be monitored by the ESP32-C3. The latching switches should be sufficient for state UI.
 
 #### USB Hub Switch
 
@@ -74,17 +76,27 @@ P_total = V_in × I_total
         = 0.833 mW
 ```
 
+> Since the USB hub switch is triggered with a momentary switch rather than a latching switch, the ESP32-C3 will monitor state for presentation to the user on the OLED screen. The monitored pins are `LED A Pin 1` and `LED B Pin 1`.
+
 #### Speaker Channels
 
 There is currently two toggle switches that are manually spliced into the 3.5mm audio cables from two computers to direct the output from each computer to the speaker left and right channels.
 This implementation will remain the same as this simple analog switching is working well.
+
+> The toggle switches are sufficient state UI and therefore does not require monitoring by the ESP32-C3.
+
+- [x] Refine design of enclosure
+    - Orient inputs and outputs on the same side
+    - Use PETG instead of PLA for better durability
+    - Use fuzzy skin to camouflage layer lines for improved aesthetics
+- [~] Redo connections to use hot-swappable DuPont connectors and longer, more flexible stranded wires
 
 #### USB Power
 
 Control USB power using MOSFETs. Planned USB-powered peripherals include:
 
 - Pyle PAD43MXUBT Audio Mixer (500mA @ 5V)
-- Arduino LED sign (200mA @ 5V)
+- Meeting Sign (200mA @ 5V)
 
 To be triggered by an ESP32, this should be accomplished with a _logic level_ P-Channel MOSFET. The MOSFET should be logic level in order to be driven by a 3.3V ESP32 directly. The IRLML6402 is widely available and cheaper but without features like short-circuit and thermal protection of a dedicated USB Switch IC.
 
@@ -95,11 +107,47 @@ Using the P-Channel MOSFET should include
 - A 1kΩ inline series gate resistor to reduce inrush current and EMI when switching the gate. [Source](https://www.build-electronic-circuits.com/mosfet-gate-resistor/)
 - A 10kΩ pull-up resistor to ensure the MOSFET stays off during MCU boot/reset, while the GPIO is floating.
 
+##### Meeting Sign
+
+An [existing project](https://github.com/noahbaculi/embedded-meeting-sign) that is USB-powered and utilizes an Arduino Nano to countdown a timer and indicate the remaining duration on a series of LEDs.
+
+- [x] Rewrite firmware
+    - [x] Use the ESP32-C3 instead of the Arduino Nano in order to use consistent `esp-hal` and `embassy` tooling
+    - [x] Allow the timer to be controlled via UART
+    - [x] If no UART commands are received, there should be a default timer
+    - [x] There should be a `SENSE` connection between the Meeting Sign ESP32-C3 and the Control Panel ESP32-C3 that allows the Control Panel to detect if the Meeting Sign is online
+        - This can be a Meeting Sign output that is set high when the Meeting Sign is online and low when it is not
+        - The Control Panel can use this signal on an input with a pull-down resistor to determine if the Meeting Sign is online and display the status on the OLED screen
+    - [~] Once a timer completes, the ESP32-C3 should go into deep sleep
+    - [ ] Archive the previous version of the repository with a link to this new version
+- [x] Refine design of enclosure
+    - [x] Shrink footprint thanks to smaller size of the ESP32-C3
+    - [~] Use USB-C socket instead of Arduino Nano's micro USB for power
+    - [~] Use power switch for manual operation if not using the Meeting Sign with the Control Panel
+
 ### Important Concepts
 
 - Make sure to connect the grounds of all the peripherals.
 
-## Development
+## High Level Wiring Diagram
+
+![High Level Wiring Diagram](./assets/high_level_wiring_diagram.svg)
+
+## Back Module Distribution PCB Schematic
+
+![Back Module Distribution PCB Schematic](./assets/back_module_distribution_schematic.svg)
+
+## Firmware Development
+
+This project is built in a `no_std` environment utilizing the `esp-hal` crate in conjunction with the [Embassy](https://embassy.dev/) framework.
+
+<!-- - Rust via [rustup](https://rustup.rs/) -->
+<!-- - Install [ESP32 Rust tooling](https://docs.esp-rs.org/book/installation/index.html) -->
+<!---->
+<!-- ```shell -->
+<!-- cargo install espup -->
+<!-- espup install -->
+<!-- ``` -->
 
 ### Commands
 
@@ -115,3 +163,11 @@ Run tests
 ```shell
 cargo test --config .cargo/probe-rs.toml
 ```
+
+## Reference
+
+[ESP32-C3 GPIO Summary](https://docs.espressif.com/projects/esp-idf/en/stable/esp32c3/api-reference/peripherals/gpio.html)
+
+### ESP32 C3 SuperMini Pinout
+
+![ESP32 C3 SuperMini Pinout](./datasheets/ESP32_C3_supermini_pinout.jpg)
