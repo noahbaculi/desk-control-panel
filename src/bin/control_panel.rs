@@ -169,31 +169,6 @@ async fn main(spawner: Spawner) {
             control_panel_state,
         ))
         .ok();
-
-    // let mut ticker = Ticker::every(Duration::from_millis(100));
-    //
-    // // Main loop
-    // loop {
-    //     {
-    //         // Draw USB switch state
-    //         control_panel_state
-    //             .lock()
-    //             .await
-    //             .usb_switch
-    //             .draw(&mut display)
-    //             .unwrap();
-    //     }
-    //     {
-    //         control_panel_state
-    //             .lock()
-    //             .await
-    //             .draw_ui(&mut display)
-    //             .unwrap();
-    //     }
-    //
-    //     display.flush().unwrap();
-    //     ticker.next().await;
-    // }
 }
 
 #[embassy_executor::task]
@@ -244,8 +219,7 @@ async fn monitor_rotary_encoder_button(
         info!("Rotary encoder button pressed! Counter = {}", counter);
 
         {
-            let mut control_panel = control_panel_state.lock().await;
-            control_panel.ui_selection_mode.toggle();
+            control_panel_state.lock().await.rotary_encoder_press();
         }
 
         // Debounce the button press

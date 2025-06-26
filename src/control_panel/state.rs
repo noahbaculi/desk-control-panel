@@ -1,9 +1,9 @@
 use embedded_graphics::{
-    mono_font::{ascii, MonoTextStyle},
+    mono_font::{ascii, MonoFont, MonoTextStyle},
     pixelcolor::BinaryColor,
     prelude::{DrawTarget, Point, Primitive, Size},
     primitives::{Line, Polyline, PrimitiveStyle, Rectangle, RoundedRectangle, StyledDrawable},
-    text::{Alignment, Baseline, Text, TextStyleBuilder},
+    text::{Alignment, Baseline, Text, TextStyle, TextStyleBuilder},
     Drawable,
 };
 use esp_hal::{
@@ -76,6 +76,8 @@ impl ControlPanelState {
                 self.ui_selection_mode = UISelectionMode::Menu;
             }
         };
+        self.draw_border_ui().unwrap();
+        self.display.flush().unwrap();
     }
 
     fn draw_selected_border_ui(
@@ -139,6 +141,8 @@ impl ControlPanelState {
     pub fn draw_entire_ui(&mut self) -> Result<(), <DisplayType as DrawTarget>::Error> {
         self.draw_border_ui()?;
         self.usb_switch_state.draw_entire_ui(&mut self.display)?;
+        USBPowerMosfet::USB_POWER_1_TEXT.draw(&mut self.display)?;
+        USBPowerMosfet::USB_POWER_2_TEXT.draw(&mut self.display)?;
         USBPowerMosfet::One.draw(&mut self.display, self.usb_power_1.output_level())?;
         USBPowerMosfet::Two.draw(&mut self.display, self.usb_power_2.output_level())?;
 
@@ -153,6 +157,14 @@ pub enum USBSwitchState {
     Off,
 }
 impl USBSwitchState {
+    pub fn from_leds(a: &Input<'static>, b: &Input<'static>) -> Self {
+        match (a.level(), b.level()) {
+            (Level::Low, Level::Low) | (Level::High, Level::High) => Self::Off,
+            (Level::High, Level::Low) => Self::On(USBSwitchOutput::A),
+            (Level::Low, Level::High) => Self::On(USBSwitchOutput::B),
+        }
+    }
+
     const ARROW_DX: i32 = 4;
     const ARROW_DY: i32 = 4;
     const STROKE_THICKNESS: u32 = 2;
@@ -193,54 +205,46 @@ impl USBSwitchState {
     ];
     const ERROR_GRAPHIC: Line = Line::new(Self::CORE_TOP, Self::CORE_BOTTOM);
 
-    pub fn from_leds(a: &Input<'static>, b: &Input<'static>) -> Self {
-        match (a.level(), b.level()) {
-            (Level::Low, Level::Low) | (Level::High, Level::High) => Self::Off,
-            (Level::High, Level::Low) => Self::On(USBSwitchOutput::A),
-            (Level::Low, Level::High) => Self::On(USBSwitchOutput::B),
-        }
-    }
+    const Y_MIDDLE: i32 = 64 / 2;
+    const TEXT_FONT: MonoFont<'_> = ascii::FONT_8X13;
+    const STYLE: MonoTextStyle<'_, BinaryColor> =
+        MonoTextStyle::new(&Self::TEXT_FONT, BinaryColor::On);
+    const CENTER_ALIGNED: TextStyle = TextStyleBuilder::new()
+        .alignment(Alignment::Center)
+        .baseline(Baseline::Middle)
+        .build();
+    const TEXT_U: Text<'_, MonoTextStyle<'_, BinaryColor>> = Text::with_text_style(
+        "U",
+        Point::new(
+            Self::CORE_TOP.x,
+            Self::Y_MIDDLE - Self::TEXT_FONT.character_size.height as i32,
+        ),
+        Self::STYLE,
+        Self::CENTER_ALIGNED,
+    );
+    const TEXT_S: Text<'_, MonoTextStyle<'_, BinaryColor>> = Text::with_text_style(
+        "S",
+        Point::new(Self::CORE_TOP.x, Self::Y_MIDDLE),
+        Self::STYLE,
+        Self::CENTER_ALIGNED,
+    );
+    const TEXT_B: Text<'_, MonoTextStyle<'_, BinaryColor>> = Text::with_text_style(
+        "B",
+        Point::new(
+            Self::CORE_TOP.x,
+            Self::Y_MIDDLE + Self::TEXT_FONT.character_size.height as i32,
+        ),
+        Self::STYLE,
+        Self::CENTER_ALIGNED,
+    );
 
     pub fn draw_entire_ui<D: DrawTarget<Color = BinaryColor>>(
         &self,
         target: &mut D,
     ) -> Result<(), D::Error> {
-        let font = ascii::FONT_7X13;
-        let style = MonoTextStyle::new(&font, BinaryColor::On);
-        let center_aligned = TextStyleBuilder::new()
-            .alignment(Alignment::Center)
-            .baseline(Baseline::Middle)
-            .build();
-
-        const Y_MIDDLE: i32 = 64 / 2;
-
-        Text::with_text_style(
-            "U",
-            Point::new(
-                Self::CORE_TOP.x,
-                Y_MIDDLE - font.character_size.height as i32,
-            ),
-            style,
-            center_aligned,
-        )
-        .draw(target)?;
-        Text::with_text_style(
-            "S",
-            Point::new(Self::CORE_TOP.x, Y_MIDDLE),
-            style,
-            center_aligned,
-        )
-        .draw(target)?;
-        Text::with_text_style(
-            "B",
-            Point::new(
-                Self::CORE_TOP.x,
-                Y_MIDDLE + font.character_size.height as i32,
-            ),
-            style,
-            center_aligned,
-        )
-        .draw(target)?;
+        Self::TEXT_U.draw(target)?;
+        Self::TEXT_S.draw(target)?;
+        Self::TEXT_B.draw(target)?;
 
         self.draw(target)?;
 
@@ -303,7 +307,7 @@ pub enum USBPowerMosfet {
 }
 impl USBPowerMosfet {
     const PADDING_X: u32 = 4;
-    const USB_POWER_SIZE: Size = Size::new(
+    const ON_INDICATOR: Size = Size::new(
         UISection::USB_POWER_SIZE.width - (Self::PADDING_X * 2),
         UISection::USB_POWER_SIZE.height - (Self::PADDING_X * 2) - 10,
     );
@@ -319,7 +323,7 @@ impl USBPowerMosfet {
                 UISection::USB_POWER_X + Self::PADDING_X as i32,
                 Self::PADDING_X as i32,
             ),
-            Self::USB_POWER_SIZE,
+            Self::ON_INDICATOR,
         ),
         Self::BORDER_RADIUS,
     );
@@ -329,9 +333,37 @@ impl USBPowerMosfet {
                 UISection::USB_POWER_X + Self::PADDING_X as i32,
                 UISection::USB_POWER_SIZE.height as i32 + Self::PADDING_X as i32,
             ),
-            Self::USB_POWER_SIZE,
+            Self::ON_INDICATOR,
         ),
         Self::BORDER_RADIUS,
+    );
+
+    const STYLE: MonoTextStyle<'_, BinaryColor> =
+        MonoTextStyle::new(&ascii::FONT_4X6, BinaryColor::On);
+    const CENTER_ALIGNED: TextStyle = TextStyleBuilder::new()
+        .alignment(Alignment::Center)
+        .baseline(Baseline::Middle)
+        .build();
+    const USB_POWER_1_TEXT: Text<'_, MonoTextStyle<'_, BinaryColor>> = Text::with_text_style(
+        "PWR 1",
+        Point::new(
+            UISection::USB_POWER_X + (UISection::USB_POWER_SIZE.width as i32 / 2),
+            (Self::ON_INDICATOR.height + (2 * Self::PADDING_X) + 2) as i32,
+        ),
+        Self::STYLE,
+        Self::CENTER_ALIGNED,
+    );
+    const USB_POWER_2_TEXT: Text<'_, MonoTextStyle<'_, BinaryColor>> = Text::with_text_style(
+        "PWR 2",
+        Point::new(
+            UISection::USB_POWER_X + (UISection::USB_POWER_SIZE.width as i32 / 2),
+            (UISection::USB_POWER_SIZE.height
+                + Self::ON_INDICATOR.height
+                + (2 * Self::PADDING_X)
+                + 2) as i32,
+        ),
+        Self::STYLE,
+        Self::CENTER_ALIGNED,
     );
 
     pub fn draw<D: DrawTarget<Color = BinaryColor>>(
