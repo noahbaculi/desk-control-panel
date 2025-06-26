@@ -145,6 +145,8 @@ impl ControlPanelState {
         USBPowerMosfet::USB_POWER_2_TEXT.draw(&mut self.display)?;
         USBPowerMosfet::One.draw(&mut self.display, self.usb_power_1.output_level())?;
         USBPowerMosfet::Two.draw(&mut self.display, self.usb_power_2.output_level())?;
+        MeetingSignUI::TITLE_TEXT.draw(&mut self.display)?;
+        MeetingSignUI.draw(&mut self.display, Level::High)?;
 
         self.display.flush()?;
         Ok(())
@@ -456,4 +458,52 @@ impl UISection {
         ),
         Self::BORDER_RADIUS,
     );
+}
+
+struct MeetingSignUI;
+impl MeetingSignUI {
+    const TEXT_FONT: MonoFont<'_> = ascii::FONT_6X12;
+    const MIDDLE_X: i32 = UISection::USB_POWER_X
+        + (UISection::USB_POWER_SIZE.width + (UISection::MEETING_SIGN_SIZE.width / 2)
+            - UISection::BORDER_WIDTH) as i32;
+
+    const STYLE: MonoTextStyle<'_, BinaryColor> =
+        MonoTextStyle::new(&Self::TEXT_FONT, BinaryColor::On);
+    const CENTER_ALIGNED: TextStyle = TextStyleBuilder::new()
+        .alignment(Alignment::Center)
+        // .baseline(Baseline::Middle)
+        .build();
+
+    pub const TITLE_TEXT: Text<'_, MonoTextStyle<'_, BinaryColor>> = Text::with_text_style(
+        "Meeting Sign",
+        Point::new(Self::MIDDLE_X, 50),
+        Self::STYLE,
+        Self::CENTER_ALIGNED,
+    );
+
+    pub const BORDER_ON_STYLE: PrimitiveStyle<BinaryColor> =
+        PrimitiveStyle::with_stroke(BinaryColor::On, 1);
+    pub const BORDER_OFF_STYLE: PrimitiveStyle<BinaryColor> =
+        PrimitiveStyle::with_stroke(BinaryColor::Off, 1);
+    const PROGRESS_SIZE: Size = Size::new(UISection::MEETING_SIGN_SIZE.width - 20, 12);
+    pub const PROGRESS_OUTLINE: RoundedRectangle = RoundedRectangle::with_equal_corners(
+        Rectangle::new(
+            Point::new(Self::MIDDLE_X - (Self::PROGRESS_SIZE.width as i32 / 2), 25),
+            Self::PROGRESS_SIZE,
+        ),
+        Size::new(3, 3),
+    );
+
+    pub fn draw<D: DrawTarget<Color = BinaryColor>>(
+        &self,
+        target: &mut D,
+        power: Level,
+    ) -> Result<(), D::Error> {
+        let style = match power {
+            Level::High => Self::BORDER_ON_STYLE,
+            Level::Low => Self::BORDER_OFF_STYLE,
+        };
+        Self::PROGRESS_OUTLINE.draw_styled(&style, target)?;
+        Ok(())
+    }
 }
