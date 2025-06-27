@@ -68,97 +68,61 @@ impl ControlPanelState {
                         .draw(&mut self.display, self.usb_power_2.output_level())
                         .unwrap();
                 }
-                UISection::MeetingSign => match direction {
-                    MovementDirection::Clockwise => {
-                        match self.meeting_sign_power.output_level() {
-                            Level::High => {
-                                info!("Meeting Sign is already running");
-                                match self.meeting_sign_completion {
-                                    None => {
-                                        self.meeting_sign_power.set_high();
-                                        self.meeting_sign_completion =
-                                            Some(Instant::now() + Self::MEETING_SIGN_INTERVAL);
-                                        error!(
-                                            "Meeting sign completion is None, but power is high."
-                                        );
-                                    }
-                                    Some(instant) => {
-                                        if instant < Instant::now() {
-                                            self.meeting_sign_power.set_high();
-                                            self.meeting_sign_completion =
-                                                Some(Instant::now() + Self::MEETING_SIGN_INTERVAL);
-                                            error!("Meeting sign completion was before NOW.");
-                                        } else if instant + Self::MEETING_SIGN_INTERVAL
-                                            < Instant::now() + Self::MEETING_SIGN_MAX_DURATION
-                                        {
-                                            self.meeting_sign_power.set_high();
-                                            self.meeting_sign_completion =
-                                                Some(instant + Self::MEETING_SIGN_INTERVAL);
-                                            info!(
-                                                "Meeting sign timer increased by {}s.",
-                                                Self::MEETING_SIGN_INTERVAL.as_secs()
-                                            );
-                                        } else {
-                                            info!("Meeting sign timer would exceed max duration, not increasing.");
-                                        }
-                                    }
-                                }
-                            }
-                            Level::Low => {
-                                self.meeting_sign_power.set_high();
-                                self.meeting_sign_completion =
-                                    Some(Instant::now() + Self::MEETING_SIGN_INTERVAL);
-                                info!("Meeting Sign turned on");
-                                info!("Meeting Sign timer started");
-                            }
-                        };
-                        self.check_meeting_sign_timer().unwrap();
-                    }
-                    MovementDirection::CounterClockwise => {
-                        match self.meeting_sign_power.output_level() {
-                            Level::High => {
-                                info!("Meeting Sign is already running");
-                                match self.meeting_sign_completion {
-                                    None => {
-                                        self.meeting_sign_power.set_low();
-                                        error!(
-                                            "Meeting sign completion is None, but power is high."
-                                        );
-                                    }
-                                    Some(instant) => {
-                                        if instant < Instant::now() {
-                                            self.meeting_sign_power.set_low();
-                                            error!("Meeting sign completion was before NOW, but power is high.");
-                                        } else if instant - Self::MEETING_SIGN_INTERVAL
-                                            < Instant::now()
-                                        {
-                                            self.meeting_sign_power.set_low();
-                                            self.meeting_sign_completion = None;
-                                            info!(
-                                                "Meeting sign turned off and completion set to None."
-                                            );
-                                        } else {
-                                            self.meeting_sign_completion =
-                                                Some(instant - Self::MEETING_SIGN_INTERVAL);
-                                            info!(
-                                                "Decreasing Meeting Sign timer by {}s.",
-                                                Self::MEETING_SIGN_INTERVAL.as_secs()
-                                            );
-                                        }
-                                    }
-                                }
-                                self.check_meeting_sign_timer().unwrap();
-                            }
-                            Level::Low => {
-                                info!("Meeting sign is already off");
-                            }
-                        };
-                    }
-                },
+                UISection::MeetingSign => {
+                    self.process_meeting_sign_change(direction).unwrap();
+                }
             },
         };
 
         self.display.flush().unwrap();
+    }
+
+    fn process_meeting_sign_change(
+        &mut self,
+        direction: MovementDirection,
+    ) -> Result<(), <DisplayType as DrawTarget>::Error> {
+        let now = Instant::now();
+
+        match (direction, self.meeting_sign_completion) {
+            (MovementDirection::Clockwise, None) => {
+                self.meeting_sign_power.set_high();
+                self.meeting_sign_completion = Some(now + Self::MEETING_SIGN_INTERVAL);
+                self.check_meeting_sign_timer()?;
+                info!("Starting meeting sign timer from None");
+            }
+            (MovementDirection::Clockwise, Some(end)) => {
+                // If the stored end is before (less than) now, we use now as the base time
+                let proposed_end = end.max(now) + Self::MEETING_SIGN_INTERVAL;
+
+                if proposed_end > now + Self::MEETING_SIGN_MAX_DURATION {
+                    info!("Meeting sign timer would exceed max duration, not increasing");
+                    return Ok(());
+                }
+
+                self.meeting_sign_power.set_high();
+                self.meeting_sign_completion = Some(proposed_end);
+                self.check_meeting_sign_timer()?;
+                info!("Meeting sign timer increased",);
+            }
+            (MovementDirection::CounterClockwise, None) => {
+                info!("Meeting sign is already off, nothing to do");
+            }
+            (MovementDirection::CounterClockwise, Some(end)) => {
+                if end - Self::MEETING_SIGN_INTERVAL < now {
+                    self.meeting_sign_power.set_low();
+                    self.meeting_sign_completion = None;
+                    info!("Meeting sign turned off and completion set to None");
+                } else {
+                    self.meeting_sign_completion = Some(end - Self::MEETING_SIGN_INTERVAL);
+                    info!(
+                        "Decreasing Meeting Sign timer by {}s.",
+                        Self::MEETING_SIGN_INTERVAL.as_secs()
+                    );
+                }
+                self.check_meeting_sign_timer()?;
+            }
+        };
+        Ok(())
     }
 
     pub fn rotary_encoder_press(&mut self) {
@@ -233,29 +197,38 @@ impl ControlPanelState {
     }
 
     pub fn check_meeting_sign_timer(&mut self) -> Result<(), <DisplayType as DrawTarget>::Error> {
+        let now = Instant::now();
+
         match (
             self.meeting_sign_power.output_level(),
             self.meeting_sign_completion,
         ) {
-            (Level::Low, None) => {}
+            (Level::Low, None) => {
+                // No action needed
+                MeetingSignUI.draw_progress(&mut self.display, ProgressRatio(0))?;
+            }
             (Level::Low, Some(_)) => {
                 error!("Meeting Sign is not on, but completion is set to something");
+                // This should not happen, but if it does, we can reset the state
+                self.meeting_sign_completion = None;
+                MeetingSignUI.draw_progress(&mut self.display, ProgressRatio(0))?;
             }
             (Level::High, None) => {
                 error!("Meeting Sign is on, but completion is None");
                 // This should not happen, but if it does, we can reset the state
                 self.meeting_sign_power.set_low();
                 self.meeting_sign_completion = None;
+                MeetingSignUI.draw_progress(&mut self.display, ProgressRatio(0))?;
             }
-            (Level::High, Some(instant)) => {
-                if instant < Instant::now() {
+            (Level::High, Some(end)) => {
+                if end < now {
                     self.meeting_sign_power.set_low();
                     self.meeting_sign_completion = None;
                     info!("Meeting Sign timer has completed");
                     MeetingSignUI.draw_progress(&mut self.display, ProgressRatio(0))?;
                 } else {
                     let ratio = ProgressRatio::from_durations(
-                        &(instant - Instant::now()),
+                        &(end - now),
                         &Self::MEETING_SIGN_MAX_DURATION,
                     )
                     .unwrap();
@@ -655,6 +628,11 @@ impl MeetingSignUI {
         let width = ratio.apply_to(Self::PROGRESS_SIZE.width as usize) as u32;
 
         Self::PROGRESS_OUTLINE.draw_styled(&PrimitiveStyle::with_fill(BinaryColor::Off), target)?;
+
+        // If the ratio is 0, do not draw the bar
+        if ratio == ProgressRatio(0) {
+            return Ok(());
+        }
 
         RoundedRectangle::with_equal_corners(
             Rectangle::new(
