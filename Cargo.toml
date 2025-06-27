@@ -52,6 +52,7 @@ esp-println = { version = "0.14.0", features = [
   "defmt-espflash",
   "log-04",
 ] }
+heapless = { version = "0.8.0", features = ["defmt-03"] }
 log = "0.4.27"
 micromath = "2.1.0"
 num-traits = { version = "0.2.19", default-features = false }

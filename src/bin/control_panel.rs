@@ -180,21 +180,16 @@ async fn monitor_rotary_encoder_rotation(
 ) {
     debug!("Starting monitor_rotary_encoder_rotation task");
     let mut rotary_encoder = Rotary::new(rotary_encoder_dt, rotary_encoder_clk);
-    let mut counter = 0;
     loop {
         let direction = rotary_encoder.update().unwrap();
         match direction {
             Direction::Clockwise => {
-                counter += 1;
-                info!("Rotary encoder {:?}! Counter = {}", direction, counter);
                 control_panel_state
                     .lock()
                     .await
                     .rotary_encoder_rotate(MovementDirection::Clockwise);
             }
             Direction::CounterClockwise => {
-                counter -= 1;
-                info!("Rotary encoder {:?}! Counter = {}", direction, counter);
                 control_panel_state
                     .lock()
                     .await

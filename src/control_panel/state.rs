@@ -1,8 +1,10 @@
+use core::fmt::Write;
+
 use embassy_time::{Duration, Instant};
 use embedded_graphics::{
     mono_font::{ascii, MonoFont, MonoTextStyle},
     pixelcolor::BinaryColor,
-    prelude::{DrawTarget, Point, Primitive, Size},
+    prelude::{Dimensions, DrawTarget, Point, Primitive, Size},
     primitives::{
         Line, Polyline, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle,
         StrokeAlignment, StyledDrawable,
@@ -15,6 +17,7 @@ use esp_hal::{
     i2c::master::I2c,
     Blocking,
 };
+use heapless::String;
 use log::{error, info};
 use ssd1306::{
     mode::BufferedGraphicsMode, prelude::I2CInterface, size::DisplaySize128x64, Ssd1306,
@@ -38,14 +41,14 @@ pub struct ControlPanelState {
     pub display: DisplayType,
 }
 
+const MEETING_SIGN_INTERVAL: Duration = Duration::from_secs(60 * 5);
+const MEETING_SIGN_MAX_DURATION: Duration = Duration::from_secs(60 * 120);
+
 pub enum MovementDirection {
     Clockwise,
     CounterClockwise,
 }
 impl ControlPanelState {
-    const MEETING_SIGN_INTERVAL: Duration = Duration::from_secs(60 * 5);
-    const MEETING_SIGN_MAX_DURATION: Duration = Duration::from_secs(60 * 120);
-
     pub fn rotary_encoder_rotate(&mut self, direction: MovementDirection) {
         match self.ui_selection_mode {
             UISelectionMode::Menu => {
@@ -86,15 +89,15 @@ impl ControlPanelState {
         match (direction, self.meeting_sign_completion) {
             (MovementDirection::Clockwise, None) => {
                 self.meeting_sign_power.set_high();
-                self.meeting_sign_completion = Some(now + Self::MEETING_SIGN_INTERVAL);
+                self.meeting_sign_completion = Some(now + MEETING_SIGN_INTERVAL);
                 self.check_meeting_sign_timer()?;
                 info!("Starting meeting sign timer from None");
             }
             (MovementDirection::Clockwise, Some(end)) => {
                 // If the stored end is before (less than) now, we use now as the base time
-                let proposed_end = end.max(now) + Self::MEETING_SIGN_INTERVAL;
+                let proposed_end = end.max(now) + MEETING_SIGN_INTERVAL;
 
-                if proposed_end > now + Self::MEETING_SIGN_MAX_DURATION {
+                if proposed_end > now + MEETING_SIGN_MAX_DURATION {
                     info!("Meeting sign timer would exceed max duration, not increasing");
                     return Ok(());
                 }
@@ -108,15 +111,15 @@ impl ControlPanelState {
                 info!("Meeting sign is already off, nothing to do");
             }
             (MovementDirection::CounterClockwise, Some(end)) => {
-                if end - Self::MEETING_SIGN_INTERVAL < now {
+                if end - MEETING_SIGN_INTERVAL < now {
                     self.meeting_sign_power.set_low();
                     self.meeting_sign_completion = None;
                     info!("Meeting sign turned off and completion set to None");
                 } else {
-                    self.meeting_sign_completion = Some(end - Self::MEETING_SIGN_INTERVAL);
+                    self.meeting_sign_completion = Some(end - MEETING_SIGN_INTERVAL);
                     info!(
                         "Decreasing Meeting Sign timer by {}s.",
-                        Self::MEETING_SIGN_INTERVAL.as_secs()
+                        MEETING_SIGN_INTERVAL.as_secs()
                     );
                 }
                 self.check_meeting_sign_timer()?;
@@ -198,45 +201,40 @@ impl ControlPanelState {
 
     pub fn check_meeting_sign_timer(&mut self) -> Result<(), <DisplayType as DrawTarget>::Error> {
         let now = Instant::now();
+        let mut remaining = None;
 
         match (
             self.meeting_sign_power.output_level(),
             self.meeting_sign_completion,
         ) {
-            (Level::Low, None) => {
-                // No action needed
-                MeetingSignUI.draw_progress(&mut self.display, ProgressRatio(0))?;
-            }
+            (Level::Low, None) => {}
             (Level::Low, Some(_)) => {
                 error!("Meeting Sign is not on, but completion is set to something");
                 // This should not happen, but if it does, we can reset the state
                 self.meeting_sign_completion = None;
-                MeetingSignUI.draw_progress(&mut self.display, ProgressRatio(0))?;
             }
             (Level::High, None) => {
                 error!("Meeting Sign is on, but completion is None");
                 // This should not happen, but if it does, we can reset the state
                 self.meeting_sign_power.set_low();
                 self.meeting_sign_completion = None;
-                MeetingSignUI.draw_progress(&mut self.display, ProgressRatio(0))?;
             }
             (Level::High, Some(end)) => {
                 if end < now {
                     self.meeting_sign_power.set_low();
                     self.meeting_sign_completion = None;
                     info!("Meeting Sign timer has completed");
-                    MeetingSignUI.draw_progress(&mut self.display, ProgressRatio(0))?;
                 } else {
-                    let ratio = ProgressRatio::from_durations(
-                        &(end - now),
-                        &Self::MEETING_SIGN_MAX_DURATION,
-                    )
-                    .unwrap();
+                    let ratio =
+                        ProgressRatio::from_durations(&(end - now), &MEETING_SIGN_MAX_DURATION)
+                            .unwrap();
                     info!("Meeting Sign timer is running with ratio={:?}", ratio);
-                    MeetingSignUI.draw_progress(&mut self.display, ratio)?;
+                    remaining = Some(end - now);
                 }
             }
         };
+
+        MeetingSignUI.draw_progress(&mut self.display, remaining)?;
 
         Ok(())
     }
@@ -249,7 +247,8 @@ impl ControlPanelState {
         USBPowerMosfet::One.draw(&mut self.display, self.usb_power_1.output_level())?;
         USBPowerMosfet::Two.draw(&mut self.display, self.usb_power_2.output_level())?;
         MeetingSignUI::TITLE_TEXT.draw(&mut self.display)?;
-        MeetingSignUI.draw(&mut self.display, Level::High)?;
+        MeetingSignUI::FULL_PROGRESS_SHAPE
+            .draw_styled(&MeetingSignUI::BORDER_ON_STYLE, &mut self.display)?;
 
         self.display.flush()?;
         Ok(())
@@ -565,32 +564,47 @@ impl UISection {
 
 struct MeetingSignUI;
 impl MeetingSignUI {
-    const TEXT_FONT: MonoFont<'_> = ascii::FONT_6X12;
     const MIDDLE_X: i32 = UISection::USB_POWER_X
         + (UISection::USB_POWER_SIZE.width + (UISection::MEETING_SIGN_SIZE.width / 2)
             - UISection::BORDER_WIDTH) as i32;
 
-    const STYLE: MonoTextStyle<'_, BinaryColor> =
-        MonoTextStyle::new(&Self::TEXT_FONT, BinaryColor::On);
+    const TITLE_FONT: MonoFont<'_> = ascii::FONT_6X12;
+    const TITLE_STYLE: MonoTextStyle<'_, BinaryColor> =
+        MonoTextStyle::new(&Self::TITLE_FONT, BinaryColor::On);
     const CENTER_ALIGNED: TextStyle = TextStyleBuilder::new()
         .alignment(Alignment::Center)
-        // .baseline(Baseline::Middle)
+        .baseline(Baseline::Top)
         .build();
-
     pub const TITLE_TEXT: Text<'_, MonoTextStyle<'_, BinaryColor>> = Text::with_text_style(
         "Meeting Sign",
-        Point::new(Self::MIDDLE_X, 50),
-        Self::STYLE,
+        Point::new(Self::MIDDLE_X, 44),
+        Self::TITLE_STYLE,
         Self::CENTER_ALIGNED,
     );
 
-    pub const BORDER_ON_STYLE: PrimitiveStyle<BinaryColor> = PrimitiveStyleBuilder::new()
+    const TIME_REMAINING_FONT: MonoFont<'_> = ascii::FONT_8X13;
+    const TIME_REMAINING_CHARACTERS: usize = 4;
+    const TIME_REMAINING_STYLE: MonoTextStyle<'_, BinaryColor> =
+        MonoTextStyle::new(&Self::TIME_REMAINING_FONT, BinaryColor::On);
+    const TIME_REMAINIG_PT: Point = Point::new(Self::MIDDLE_X, 5);
+
+    const TIME_REMAINING_SIZE: Size = Size::new(
+        Self::TIME_REMAINING_FONT.character_size.width * Self::TIME_REMAINING_CHARACTERS as u32,
+        Self::TIME_REMAINING_FONT.character_size.height,
+    );
+    const TIME_REMAINING_BOUNDING_BOX: Rectangle = Rectangle::new(
+        Point::new(
+            Self::TIME_REMAINIG_PT.x - (Self::TIME_REMAINING_SIZE.width as i32 / 2),
+            Self::TIME_REMAINIG_PT.y,
+        ),
+        Size::new(
+            Self::TIME_REMAINING_FONT.character_size.width * Self::TIME_REMAINING_CHARACTERS as u32,
+            Self::TIME_REMAINING_FONT.character_size.height,
+        ),
+    );
+
+    const BORDER_ON_STYLE: PrimitiveStyle<BinaryColor> = PrimitiveStyleBuilder::new()
         .stroke_color(BinaryColor::On)
-        .stroke_width(1)
-        .stroke_alignment(StrokeAlignment::Outside)
-        .build();
-    pub const BORDER_OFF_STYLE: PrimitiveStyle<BinaryColor> = PrimitiveStyleBuilder::new()
-        .stroke_color(BinaryColor::Off)
         .stroke_width(1)
         .stroke_alignment(StrokeAlignment::Outside)
         .build();
@@ -600,49 +614,79 @@ impl MeetingSignUI {
     const PROGRESS_Y: i32 = 25;
     const PROGRESS_PT: Point = Point::new(Self::PROGRESS_X, Self::PROGRESS_Y);
     const PROGRESS_CORNER_RADIUS: Size = Size::new(3, 3);
-    pub const PROGRESS_OUTLINE: RoundedRectangle = RoundedRectangle::with_equal_corners(
+    const FULL_PROGRESS_SHAPE: RoundedRectangle = RoundedRectangle::with_equal_corners(
         Rectangle::new(Self::PROGRESS_PT, Self::PROGRESS_SIZE),
         Self::PROGRESS_CORNER_RADIUS,
     );
-    pub const BAR_ON_STYLE: PrimitiveStyle<BinaryColor> =
-        PrimitiveStyle::with_fill(BinaryColor::On);
-
-    pub fn draw<D: DrawTarget<Color = BinaryColor>>(
-        &self,
-        target: &mut D,
-        power: Level,
-    ) -> Result<(), D::Error> {
-        let style = match power {
-            Level::High => Self::BORDER_ON_STYLE,
-            Level::Low => Self::BORDER_OFF_STYLE,
-        };
-        Self::PROGRESS_OUTLINE.draw_styled(&style, target)?;
-        Ok(())
-    }
+    const BAR_ON_STYLE: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_fill(BinaryColor::On);
 
     pub fn draw_progress<D: DrawTarget<Color = BinaryColor>>(
         &self,
         target: &mut D,
-        ratio: ProgressRatio,
+        remaining: Option<Duration>,
     ) -> Result<(), D::Error> {
-        let width = ratio.apply_to(Self::PROGRESS_SIZE.width as usize) as u32;
+        // Clear the interior of the progress bar
+        Self::FULL_PROGRESS_SHAPE
+            .draw_styled(&PrimitiveStyle::with_fill(BinaryColor::Off), target)?;
 
-        Self::PROGRESS_OUTLINE.draw_styled(&PrimitiveStyle::with_fill(BinaryColor::Off), target)?;
+        // Clear the time remaining text area
+        Self::TIME_REMAINING_BOUNDING_BOX
+            .draw_styled(&PrimitiveStyle::with_fill(BinaryColor::Off), target)?;
 
-        // If the ratio is 0, do not draw the bar
-        if ratio == ProgressRatio(0) {
-            return Ok(());
+        match remaining {
+            None => {
+                // If no time is remaining, do not draw the progress bar or the time remaining text
+                return Ok(());
+            }
+            Some(remaining) => {
+                let remaining_secs = remaining.as_secs();
+                let time_remaining_text = Self::format_duration_h_mm(remaining_secs);
+
+                let time_remaining = Text::with_text_style(
+                    &time_remaining_text,
+                    Self::TIME_REMAINIG_PT,
+                    Self::TIME_REMAINING_STYLE,
+                    Self::CENTER_ALIGNED,
+                );
+                error!(
+                    "Time remaining bounding box: {:?} vs {:?}",
+                    time_remaining.bounding_box(),
+                    Self::TIME_REMAINING_BOUNDING_BOX
+                );
+                time_remaining.draw(target)?;
+
+                let ratio =
+                    ProgressRatio::from_durations(&remaining, &MEETING_SIGN_MAX_DURATION).unwrap();
+                let bar_width = ratio.apply_to(Self::PROGRESS_SIZE.width as usize) as u32;
+
+                RoundedRectangle::with_equal_corners(
+                    Rectangle::new(
+                        Self::PROGRESS_PT,
+                        Size::new(bar_width, Self::PROGRESS_SIZE.height),
+                    ),
+                    Self::PROGRESS_CORNER_RADIUS,
+                )
+                .draw_styled(&Self::BAR_ON_STYLE, target)?;
+            }
         }
 
-        RoundedRectangle::with_equal_corners(
-            Rectangle::new(
-                Self::PROGRESS_PT,
-                Size::new(width, Self::PROGRESS_SIZE.height),
-            ),
-            Self::PROGRESS_CORNER_RADIUS,
-        )
-        .draw_styled(&Self::BAR_ON_STYLE, target)?;
-
         Ok(())
+    }
+
+    /// Format duration in seconds as "h:mm"
+    /// Naturally, with only 4 characters this will not handle durations longer than 9 hours 59 minutes.
+    fn format_duration_h_mm(mut seconds: u64) -> String<{ Self::TIME_REMAINING_CHARACTERS }> {
+        let mut s = String::<{ Self::TIME_REMAINING_CHARACTERS }>::new();
+
+        seconds += 59; // Add 59 seconds to round up to the next minute
+        seconds = seconds.min(9 * 60 * 60 + 59 * 60); // Cap at 9 hours 59 minutes
+
+        let hours = seconds / 3600;
+        let minutes = (seconds % 3600) / 60;
+
+        // Format as "h:mm"
+        write!(&mut s, "{}:{:02}", hours, minutes).unwrap();
+
+        s
     }
 }
