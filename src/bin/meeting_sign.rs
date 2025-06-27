@@ -15,7 +15,6 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::pubsub::{ImmediatePublisher, PubSubChannel, Subscriber};
 use embassy_time::{Duration, Instant, Timer};
-use esp_hal::gpio::RtcPin;
 use esp_hal::rtc_cntl::Rtc;
 use esp_hal::{
     clock::CpuClock,
@@ -29,7 +28,7 @@ use static_cell::StaticCell;
 
 const NUM_LEDS: usize = 9;
 const LED_PINS: [u8; NUM_LEDS] = [5, 6, 7, 8, 9, 10, 20, 21, 0];
-const BUILT_IN_TIMER_DURATION: Duration = Duration::from_secs(60 * 1); // 90 minutes
+const BUILT_IN_TIMER_DURATION: Duration = Duration::from_secs(60 * 2); // 90 minutes
 const BUILT_IN_TIMER_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
@@ -225,7 +224,7 @@ impl<'a> LEDs<'a> {
         }
     }
 
-    pub fn set_pattern_array(&mut self, pattern: &[bool; NUM_LEDS]) {
+    pub fn _set_pattern_array(&mut self, pattern: &[bool; NUM_LEDS]) {
         for (led, &should_be_on) in self.led_outs.iter_mut().zip(pattern.iter()) {
             if should_be_on {
                 led.set_high();

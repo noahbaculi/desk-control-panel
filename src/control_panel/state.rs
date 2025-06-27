@@ -1,5 +1,5 @@
+use crate::meeting_instruction::ProgressRatio;
 use core::fmt::Write;
-
 use embassy_time::{Duration, Instant};
 use embedded_graphics::{
     mono_font::{ascii, MonoFont, MonoTextStyle},
@@ -22,8 +22,6 @@ use log::{error, info};
 use ssd1306::{
     mode::BufferedGraphicsMode, prelude::I2CInterface, size::DisplaySize128x64, Ssd1306,
 };
-
-use crate::meeting_instruction::ProgressRatio;
 
 type DisplayType = Ssd1306<
     I2CInterface<I2c<'static, Blocking>>,
@@ -639,8 +637,8 @@ impl MeetingSignUI {
                 return Ok(());
             }
             Some(remaining) => {
-                let remaining_secs = remaining.as_secs();
-                let time_remaining_text = Self::format_duration_h_mm(remaining_secs);
+                // let remaining_secs = remaining.as_secs();
+                let time_remaining_text = Self::format_duration_h_mm(&remaining);
 
                 let time_remaining = Text::with_text_style(
                     &time_remaining_text,
@@ -675,9 +673,10 @@ impl MeetingSignUI {
 
     /// Format duration in seconds as "h:mm"
     /// Naturally, with only 4 characters this will not handle durations longer than 9 hours 59 minutes.
-    fn format_duration_h_mm(mut seconds: u64) -> String<{ Self::TIME_REMAINING_CHARACTERS }> {
+    fn format_duration_h_mm(duration: &Duration) -> String<{ Self::TIME_REMAINING_CHARACTERS }> {
         let mut s = String::<{ Self::TIME_REMAINING_CHARACTERS }>::new();
 
+        let mut seconds = duration.as_secs();
         seconds += 59; // Add 59 seconds to round up to the next minute
         seconds = seconds.min(9 * 60 * 60 + 59 * 60); // Cap at 9 hours 59 minutes
 

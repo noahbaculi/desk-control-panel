@@ -226,7 +226,7 @@ async fn monitor_rotary_encoder_button(
 #[embassy_executor::task]
 async fn monitor_meeting_sign_sense(
     mut digital_input: Input<'static>,
-    control_panel_state: &'static StateMutex,
+    _control_panel_state: &'static StateMutex,
 ) {
     debug!("Starting monitor_meeting_sign_sense task");
     loop {
@@ -268,7 +268,7 @@ async fn monitor_usb_switch_leds(
 }
 
 #[embassy_executor::task]
-async fn monitor_meeting_sign_timer(control_panel_state: &'static StateMutex) {
+async fn monitor_meeting_sign_timer(_control_panel_state: &'static StateMutex) {
     debug!("Starting monitor_meeting_sign_timer task");
     let mut ticker = Ticker::every(Duration::from_secs(1));
     loop {
