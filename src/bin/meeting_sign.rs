@@ -27,9 +27,13 @@ use log::{debug, error, info, trace, warn, LevelFilter};
 use static_cell::StaticCell;
 
 const NUM_LEDS: usize = 9;
-const LED_PINS: [u8; NUM_LEDS] = [5, 6, 7, 8, 9, 10, 20, 21, 0];
-const BUILT_IN_TIMER_DURATION: Duration = Duration::from_secs(60 * 2); // 90 minutes
-const BUILT_IN_TIMER_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
+const LED_PINS: [u8; NUM_LEDS] = [5, 6, 7, 3, 4, 10, 20, 21, 0];
+const STATUS_GPIO_PIN_NUMBER: u32 = 1;
+
+// const BUILT_IN_TIMER_DURATION: Duration = Duration::from_secs(60 * 90); // 90 minutes
+const BUILT_IN_TIMER_DURATION: Duration = Duration::from_secs(15);
+// const BUILT_IN_TIMER_UPDATE_INTERVAL: Duration = Duration::from_secs(60 * 5);
+const BUILT_IN_TIMER_UPDATE_INTERVAL: Duration = Duration::from_secs(1);
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -89,7 +93,7 @@ async fn main(spawner: Spawner) {
     let startup_instant = Instant::now();
 
     // WARN: This status pin needs to match the emergency hardcoded panic pin
-    let status_pin = Output::new(peripherals.GPIO3, Level::High, OutputConfig::default());
+    let status_pin = Output::new(peripherals.GPIO1, Level::High, OutputConfig::default());
     // Store the pin globally for panic handler access
     unsafe {
         STATUS_PIN = Some(status_pin);
@@ -100,8 +104,8 @@ async fn main(spawner: Spawner) {
         peripherals.GPIO5.into(),
         peripherals.GPIO6.into(),
         peripherals.GPIO7.into(),
-        peripherals.GPIO8.into(), // TODO: Change to a non-strapping pin
-        peripherals.GPIO9.into(), // TODO: Change to a non-strapping pin
+        peripherals.GPIO3.into(),
+        peripherals.GPIO4.into(),
         peripherals.GPIO10.into(),
         peripherals.GPIO20.into(),
         peripherals.GPIO21.into(),
@@ -130,7 +134,7 @@ async fn main(spawner: Spawner) {
         .subscriber()
         .expect("Failed to create state subscriber 2");
 
-    let rx_pin = peripherals.GPIO1;
+    let rx_pin = peripherals.GPIO2;
     let uart_config = Config::default().with_rx(
         RxConfig::default().with_fifo_full_threshold(meeting_instruction::READ_BUF_SIZE as u16),
     );
@@ -247,7 +251,7 @@ impl<'a> LEDs<'a> {
                 if let Some(ref mut pin) = STATUS_PIN {
                     pin.set_low();
                 } else {
-                    emergency_gpio3_low();
+                    emergency_gpio1_low();
                 }
             }
 
@@ -377,7 +381,7 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
             if let Some(ref mut pin) = STATUS_PIN {
                 pin.set_low();
             } else {
-                emergency_gpio3_low();
+                emergency_gpio1_low();
             }
 
             set_leds_panic_pattern();
@@ -400,16 +404,14 @@ const GPIO_OUT_REG: *mut u32 = (GPIO_BASE_REG + 0x0004) as *mut u32; // GPIO out
 const GPIO_ENABLE_REG: *mut u32 = (GPIO_BASE_REG + 0x0020) as *mut u32; // GPIO output enable register
 
 /// Emergency function to set GPIO pin low using direct register access
-unsafe fn emergency_gpio3_low() {
-    const GPIO_PIN_NUMBER: u32 = 3;
-
+unsafe fn emergency_gpio1_low() {
     // Enable GPIO pin as output
     let enable_val = core::ptr::read_volatile(GPIO_ENABLE_REG);
-    core::ptr::write_volatile(GPIO_ENABLE_REG, enable_val | (1 << GPIO_PIN_NUMBER));
+    core::ptr::write_volatile(GPIO_ENABLE_REG, enable_val | (1 << STATUS_GPIO_PIN_NUMBER));
 
     // Set GPIO pin low (clear the bit)
     let out_val = core::ptr::read_volatile(GPIO_OUT_REG);
-    core::ptr::write_volatile(GPIO_OUT_REG, out_val & !(1 << GPIO_PIN_NUMBER));
+    core::ptr::write_volatile(GPIO_OUT_REG, out_val & !(1 << STATUS_GPIO_PIN_NUMBER));
 }
 
 /// Panic function to set panic pattern on LEDs via GPIO pins
