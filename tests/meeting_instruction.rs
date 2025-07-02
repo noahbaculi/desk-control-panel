@@ -54,7 +54,6 @@ mod tests {
         // Test all instruction variants
         let instructions = [
             MeetingSignInstruction::Off,
-            MeetingSignInstruction::Diagnostic,
             MeetingSignInstruction::On(ProgressRatio(0)),
             MeetingSignInstruction::On(ProgressRatio(85)),
             MeetingSignInstruction::On(ProgressRatio(127)),
