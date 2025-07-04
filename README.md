@@ -126,8 +126,8 @@ The Meeting Sign will be powered via one of the USB Power MOSFETs controlled by 
     - [ ] Archive the previous version of the repository with a link to this new version
 - [x] Refine design of enclosure
     - [x] Shrink footprint thanks to smaller size of the ESP32-C3
-    - [~] Use USB-C socket instead of Arduino Nano's micro USB for power
-    - [~] Use power switch for manual operation if not using the Meeting Sign with the Control Panel
+    - [x] Use USB-C socket instead of Arduino Nano's micro USB for power
+    - [x] Use power switch for manual operation if not using the Meeting Sign with the Control Panel
 
 ### Important Concepts
 
