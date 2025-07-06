@@ -477,9 +477,11 @@ impl USBPowerMosfet {
             USBPowerMosfet::One => Self::USB_POWER_1,
             USBPowerMosfet::Two => Self::USB_POWER_2,
         };
+
+        // NOTE: Since this is a P-Channel MOSFET, the MOSFET is "on" when the gate is low.
         let style = match power {
-            Level::High => Self::ON_STYLE,
-            Level::Low => Self::OFF_STYLE,
+            Level::High => Self::OFF_STYLE,
+            Level::Low => Self::ON_STYLE,
         };
         shape.draw_styled(&Self::CLEAR_STYLE, target)?;
         shape.draw_styled(&style, target)?;

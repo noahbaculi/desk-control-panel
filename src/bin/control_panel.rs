@@ -25,7 +25,7 @@ use embedded_graphics::{
 };
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
+use esp_hal::gpio::{DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull};
 use esp_hal::i2c::master::I2c;
 use esp_hal::time::Rate;
 use esp_hal::timer::systimer::SystemTimer;
@@ -60,8 +60,17 @@ async fn main(spawner: Spawner) {
 
     info!("Embassy initialized!");
 
-    let usb_power_1 = Output::new(peripherals.GPIO9, Level::Low, OutputConfig::default());
-    let usb_power_2 = Output::new(peripherals.GPIO10, Level::Low, OutputConfig::default());
+    // NOTE: Since this is a P-Channel MOSFET, the MOSFET is "off" when the gate is high/floating.
+    let usb_power_1 = Output::new(
+        peripherals.GPIO9,
+        Level::High,
+        OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
+    );
+    let usb_power_2 = Output::new(
+        peripherals.GPIO10,
+        Level::High,
+        OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
+    );
 
     let meeting_sign_power = Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default());
     // This signal should be 3.3V high when the Meeting Sign is operating correctly
