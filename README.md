@@ -122,7 +122,7 @@ The Meeting Sign will be powered via one of the USB Power MOSFETs controlled by 
     - [x] There should be a `SENSE` connection between the Meeting Sign ESP32-C3 and the Control Panel ESP32-C3 that allows the Control Panel to detect if the Meeting Sign is online
         - This can be a Meeting Sign output that is set high when the Meeting Sign is online and low when it is not
         - The Control Panel can use this signal on an input with a pull-down resistor to determine if the Meeting Sign is online and display the status on the OLED screen
-    - [~] Once a timer completes, the ESP32-C3 should go into deep sleep
+    - [x] Once a timer completes, the ESP32-C3 should go into deep sleep
     - [ ] Archive the previous version of the repository with a link to this new version
 - [x] Refine design of enclosure
     - [x] Shrink footprint thanks to smaller size of the ESP32-C3
