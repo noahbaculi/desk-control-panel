@@ -21,21 +21,62 @@ The 2 IN - 1 OUT HDMI switch has 3 control pins:
 
 - GND
 - INPUT
-- 3.65V
+- 3.2V
 
 When the INPUT is pulled to GND, the switch's output is the HDMI Input A.
-When the INPUT is pulled to 3.65V, the switch's output is the HDMI Input B.
-When the INPUT is floating, the switch's output seems to default to the HDMI Input B.
+When the INPUT is pulled to 3.2V, the switch's output is the HDMI Input B.
+When the INPUT is floating, the switch's output is unstable and may not output anything.
 
-The INPUT control pin will be driven by a simple latching switch and a 10kΩ pull-up resistor.
+The INPUT control pin will be driven by a simple latching switch and a 10kΩ pull-up or pull-down resistor.
+
+The voltages of the switch pins are as follows:
+
+```
+With the stock switch:
+          ┌─────┐
+┌─────────└─────┘─────────┐
+│       5.2V   GND        │
+│ ┌───┐  │      │   ┌───┐ │
+│ │ON │ 5.2V   0V   │OFF│ │
+│ └───┘             └───┘ │
+│       4.9V   3.2V       │
+└─┌─────┐─────────┌─────┐─┘
+  └─────┘         └─────┘
+
+          ┌─────┐
+┌─────────└─────┘─────────┐
+│       5.2V   GND        │
+│ ┌───┐  │          ┌───┐ │
+│ │OFF│ 4.9V   0V   │ON │ │
+│ └───┘  │      │   └───┘ │
+│       4.9V   3.2V       │
+└─┌─────┐─────────┌─────┐─┘
+  └─────┘         └─────┘
+
+```
+
+```
+With the stock switch removed:
+          ┌─────┐
+┌─────────└─────┘─────────┐
+│       5.2V   GND        │
+│ ┌───┐             ┌───┐ │
+│ │ ~ │ 1.3V   1.5V │ ~ │ │
+│ └───┘             └───┘ │
+│       4.9V   1.5V       │
+└─┌─────┐─────────┌─────┐─┘
+  └─────┘         └─────┘
+```
+
+The INPUT control pin will be driven by a simple latching switch and a 10kΩ pull-down resistor.
 
 There are two LEDs to indicate which computer is being used as the source. These can be tapped into in order to get the current state to be read by the ESP32 and displayed on the OLED screen.
 When active, the LED has a 1.8V potential difference. However, relative to a shared GND, these are the observed voltages in the various states:
 
 | LED A State | LED A Pin 1 | LED A Pin 2 | LED B State | LED B Pin 1 | LED B Pin 2 |
 | ----------- | ----------- | ----------- | ----------- | ----------- | ----------- |
-| ON          | 1.8V        | 0V          | OFF         | 0V          | 0V          |
-| OFF         | 3.3V        | 3.3V        | ON          | 0V          | 1.8V        |
+| ON          | 0V          | 2.5V        | OFF         | 0V          | 0V          |
+| OFF         | 0V          | 0V          | ON          | 0V          | 2.5V        |
 
 > [!NOTE]
 > Due to lack of pins on the ESP32-C3, the state of the HDMI Switches will *not* be monitored by the ESP32-C3. The latching switches should be sufficient for state UI.
