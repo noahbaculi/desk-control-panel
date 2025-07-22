@@ -17,17 +17,6 @@ A MCU like an ESP32-C3 enables a fancier interface with a 0.96" OLED screen.
 
 #### HDMI Switch
 
-The 2 IN - 1 OUT HDMI switch has 3 control pins:
-
-- GND
-- INPUT
-- 3.2V
-
-When the INPUT is pulled to GND, the switch's output is the HDMI Input A.
-When the INPUT is pulled to 3.2V, the switch's output is the HDMI Input B.
-When the INPUT is floating, the switch's output is unstable and may not output anything.
-
-The INPUT control pin will be driven by a simple latching switch and a 10kΩ pull-up or pull-down resistor.
 
 The voltages of the switch pins are as follows:
 
@@ -47,14 +36,13 @@ With the stock switch:
 ┌─────────└─────┘─────────┐
 │       5.2V   GND        │
 │ ┌───┐  │          ┌───┐ │
-│ │OFF│ 4.9V   0V   │ON │ │
+│ │OFF│ 4.9V   3.2V │ON │ │
 │ └───┘  │      │   └───┘ │
 │       4.9V   3.2V       │
 └─┌─────┐─────────┌─────┐─┘
   └─────┘         └─────┘
 
 ```
-
 ```
 With the stock switch removed:
           ┌─────┐
@@ -63,12 +51,30 @@ With the stock switch removed:
 │ ┌───┐             ┌───┐ │
 │ │ ~ │ 1.3V   1.5V │ ~ │ │
 │ └───┘             └───┘ │
-│       4.9V   1.5V       │
+│       4.9V   3.2V       │
+└─┌─────┐─────────┌─────┐─┘
+  └─────┘         └─────┘
+```
+```
+Switch pin numbers:
+          ┌─────┐
+┌─────────└─────┘─────────┐
+│         1     4         │
+│ ┌───┐             ┌───┐ │
+│ │ ~ │   2     5   │ ~ │ │
+│ └───┘             └───┘ │
+│         3     6         │
 └─┌─────┐─────────┌─────┐─┘
   └─────┘         └─────┘
 ```
 
-The INPUT control pin will be driven by a simple latching switch and a 10kΩ pull-down resistor.
+When the INPUT is pulled to GND, the switch's output is the HDMI Input A.
+When the INPUT is pulled to 3.2V, the switch's output is the HDMI Input B.
+When the INPUT is floating, the switch's output is unstable and may not output anything.
+
+The INPUT control pin will be driven by a simple latching switch and a 1kΩ pull-up resistor.
+
+To modify the HDMI switch from stock, pins 1, 2, and 3 should be bridged together. The pull-up resistor is placed between pins 5 and 6.
 
 There are two LEDs to indicate which computer is being used as the source. These can be tapped into in order to get the current state to be read by the ESP32 and displayed on the OLED screen.
 When active, the LED has a 1.8V potential difference. However, relative to a shared GND, these are the observed voltages in the various states:
