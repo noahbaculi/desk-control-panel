@@ -74,8 +74,6 @@ impl ControlPanelState {
                 }
             },
         };
-
-        self.display.flush().unwrap();
     }
 
     fn process_meeting_sign_change(
@@ -136,7 +134,6 @@ impl ControlPanelState {
             }
         };
         self.draw_border_ui().unwrap();
-        self.display.flush().unwrap();
     }
 
     fn draw_selected_border_ui(
@@ -187,14 +184,9 @@ impl ControlPanelState {
         Ok(())
     }
 
-    pub fn update_usb_switch_state(
-        &mut self,
-        usb_switch_state: USBSwitchState,
-    ) -> Result<(), <DisplayType as DrawTarget>::Error> {
+    pub fn update_usb_switch_state(&mut self, usb_switch_state: USBSwitchState) {
         self.usb_switch_state = usb_switch_state;
-        self.usb_switch_state.draw(&mut self.display)?;
-        self.display.flush()?;
-        Ok(())
+        self.usb_switch_state.draw(&mut self.display).unwrap();
     }
 
     pub fn check_meeting_sign_timer(&mut self) -> Result<(), <DisplayType as DrawTarget>::Error> {
@@ -251,7 +243,6 @@ impl ControlPanelState {
         MeetingSignUI::FULL_PROGRESS_SHAPE
             .draw_styled(&MeetingSignUI::BORDER_ON_STYLE, &mut self.display)?;
 
-        self.display.flush()?;
         Ok(())
     }
 }

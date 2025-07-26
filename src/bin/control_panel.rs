@@ -121,7 +121,11 @@ async fn main(spawner: Spawner) {
         display,
         meeting_sign_completion: None,
     }));
-    control_panel_state.lock().await.draw_entire_ui().unwrap();
+    {
+        let mut cps = control_panel_state.lock().await;
+        cps.draw_entire_ui().unwrap();
+        cps.display.flush().unwrap();
+    }
 
     spawner
         .spawn(monitor_meeting_sign_sense(
@@ -193,16 +197,14 @@ async fn monitor_rotary_encoder_rotation(
         let direction = rotary_encoder.update().unwrap();
         match direction {
             Direction::Clockwise => {
-                control_panel_state
-                    .lock()
-                    .await
-                    .rotary_encoder_rotate(MovementDirection::Clockwise);
+                let mut cps = control_panel_state.lock().await;
+                cps.rotary_encoder_rotate(MovementDirection::Clockwise);
+                cps.display.flush().unwrap();
             }
             Direction::CounterClockwise => {
-                control_panel_state
-                    .lock()
-                    .await
-                    .rotary_encoder_rotate(MovementDirection::CounterClockwise);
+                let mut cps = control_panel_state.lock().await;
+                cps.rotary_encoder_rotate(MovementDirection::CounterClockwise);
+                cps.display.flush().unwrap();
             }
             Direction::None => {}
         }
@@ -224,7 +226,9 @@ async fn monitor_rotary_encoder_button(
         info!("Rotary encoder button pressed! Counter = {counter}");
 
         {
-            control_panel_state.lock().await.rotary_encoder_press();
+            let mut cps = control_panel_state.lock().await;
+            cps.rotary_encoder_press();
+            cps.display.flush().unwrap();
         }
 
         // Debounce the button press
@@ -268,11 +272,11 @@ async fn monitor_usb_switch_leds(
 
         let usb_switch_state = USBSwitchState::from_leds(&led_a, &led_b);
 
-        control_panel_state
-            .lock()
-            .await
-            .update_usb_switch_state(usb_switch_state)
-            .unwrap();
+        {
+            let mut cps = control_panel_state.lock().await;
+            cps.update_usb_switch_state(usb_switch_state);
+            cps.display.flush().unwrap();
+        }
     }
 }
 
