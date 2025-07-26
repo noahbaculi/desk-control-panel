@@ -265,7 +265,7 @@ impl<'a> LEDs<'a> {
             );
             let ratio = ProgressRatio::from_durations(&on_duration, &BUILT_IN_TIMER_DURATION)
                 .expect("Failed to calculate ratio from durations");
-            debug!("Setting LEDs based on ratio: {:?}", ratio);
+            debug!("Setting LEDs based on ratio: {ratio:?}");
             // Set LEDs based on the portion
             self.set_ratio_low(ratio);
         }
@@ -285,38 +285,38 @@ async fn uart_reader(
 
     let mut offset = 0;
     loop {
-        trace!("Beginning read loop, current offset: {}", offset);
+        trace!("Beginning read loop, current offset: {offset}");
         match embedded_io_async::Read::read(&mut uart, &mut read_buf[offset..]).await {
             Ok(len) => {
                 offset += len;
-                trace!("Read {} bytes, total buffer: {}", len, offset);
+                trace!("Read {len} bytes, total buffer: {offset}");
 
                 // Look for delimiter
                 if let Some(delimiter_pos) = read_buf[..offset].iter().position(|&b| b == 0x00) {
                     let encoded_data = &read_buf[..delimiter_pos];
-                    trace!("Received encoded data: {:?}", encoded_data);
+                    trace!("Received encoded data: {encoded_data:?}");
 
                     match cobs::decode(encoded_data, &mut decode_buf) {
                         Ok(decoded_len) => {
                             let decoded_data = &decode_buf[..decoded_len];
-                            trace!("Decoded data: {:?}", decoded_data);
+                            trace!("Decoded data: {decoded_data:?}");
                             match postcard::from_bytes::<MeetingSignInstruction>(decoded_data) {
                                 Ok(instruction) => {
-                                    debug!("Received: {:?}", instruction);
+                                    debug!("Received: {instruction:?}");
                                     state_publisher
                                         .publish_immediate(MeetingSignState::Uart(instruction));
                                 }
-                                Err(e) => warn!("Deserialization error: {:?}", e),
+                                Err(e) => warn!("Deserialization error: {e:?}"),
                             }
                         }
                         Err(e) => {
-                            warn!("COBS decode error: {:?}", e);
+                            warn!("COBS decode error: {e:?}");
                         }
                     }
                     offset = 0; // Reset after processing
                 }
             }
-            Err(e) => error!("UART read error: {:?}", e),
+            Err(e) => error!("UART read error: {e:?}"),
         }
 
         // Prevent buffer overflow
@@ -388,7 +388,7 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
         }
     });
 
-    error!("Panic occurred: {:?}", info);
+    error!("Panic occurred: {info:?}");
 
     // Halt the system
     loop {

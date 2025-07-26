@@ -98,8 +98,7 @@ mod tests {
             for (byte_idx, &byte) in encoded_data.iter().enumerate() {
                 assert_ne!(
                     byte, 0x00,
-                    "COBS encoding failed: null byte found at position {} for instruction {:?}",
-                    byte_idx, orig_instruction
+                    "COBS encoding failed: null byte found at position {byte_idx} for instruction {orig_instruction:?}"
                 );
             }
 
@@ -118,15 +117,13 @@ mod tests {
 
             assert_eq!(
                 decoded_len, serialized_len,
-                "Decoded length {} doesn't match original serialized length {} for instruction {:?}",
-                decoded_len, serialized_len, orig_instruction
+                "Decoded length {decoded_len} doesn't match original serialized length {serialized_len} for instruction {orig_instruction:?}"
             );
 
             let decoded_data = &decode_buf[..decoded_len];
             assert_eq!(
                 decoded_data, serialized,
-                "COBS decode didn't match original serialized data for instruction {:?}",
-                orig_instruction
+                "COBS decode didn't match original serialized data for instruction {orig_instruction:?}"
             );
 
             info!(
@@ -146,8 +143,7 @@ mod tests {
             // Step 5: Verify round-trip
             assert_eq!(
                 orig_instruction, &deserialized_instruction,
-                "Round-trip failed for instruction {:?}, got {:?}",
-                orig_instruction, deserialized_instruction
+                "Round-trip failed for instruction {orig_instruction:?}, got {deserialized_instruction:?}"
             );
 
             info!("  Round-trip successful: {:?}", deserialized_instruction);

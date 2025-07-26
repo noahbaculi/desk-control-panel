@@ -221,7 +221,7 @@ async fn monitor_rotary_encoder_button(
     loop {
         button.wait_for_falling_edge().await;
         counter += 1;
-        info!("Rotary encoder button pressed! Counter = {}", counter);
+        info!("Rotary encoder button pressed! Counter = {counter}");
 
         {
             control_panel_state.lock().await.rotary_encoder_press();
@@ -319,10 +319,7 @@ async fn writer(mut uart: Uart<'static, Async>) {
             let encoded_len = cobs::encode(serialized, &mut encode_buf);
 
             debug!("{:?}", &duration);
-            debug!(
-                "Serialized: {} bytes, Encoded: {} bytes",
-                serialized_len, encoded_len
-            );
+            debug!("Serialized: {serialized_len} bytes, Encoded: {encoded_len} bytes");
             debug!(
                 "Minutes: {:?} | Instruction: {:?} | Raw data: {:?} | Encoded data: {:?}",
                 num_minutes,

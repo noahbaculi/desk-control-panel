@@ -4,7 +4,7 @@ use embassy_time::{Duration, Instant};
 use embedded_graphics::{
     mono_font::{ascii, MonoFont, MonoTextStyle},
     pixelcolor::BinaryColor,
-    prelude::{Dimensions, DrawTarget, Point, Primitive, Size},
+    prelude::{DrawTarget, Point, Primitive, Size},
     primitives::{
         Line, Polyline, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle,
         StrokeAlignment, StyledDrawable,
@@ -684,7 +684,7 @@ impl MeetingSignUI {
         let minutes = (seconds % 3600) / 60;
 
         // Format as "h:mm"
-        write!(&mut s, "{}:{:02}", hours, minutes).unwrap();
+        write!(&mut s, "{hours}:{minutes:02}").unwrap();
 
         s
     }
