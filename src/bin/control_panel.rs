@@ -277,28 +277,15 @@ async fn monitor_usb_switch_leds(
 }
 
 #[embassy_executor::task]
-async fn monitor_meeting_sign_timer(_control_panel_state: &'static StateMutex) {
+async fn monitor_meeting_sign_timer(control_panel_state: &'static StateMutex) {
     debug!("Starting monitor_meeting_sign_timer task");
-    let mut ticker = Ticker::every(Duration::from_secs(1));
+    let mut ticker = Ticker::every(Duration::from_secs(10));
     loop {
-        // let timer_completion = { control_panel_state.lock().await.meeting_sign_completion };
-        // match timer_completion {
-        //     Some(instant) => {
-        //         let now = Instant::now();
-        //         if now < instant {
-        //             info!("Meeting Sign timer is running");
-        //         } else {
-        //             info!("Meeting Sign timer has completed");
-        //             control_panel_state
-        //                 .lock()
-        //                 .await
-        //                 .update_meeting_sign_completion(None);
-        //         }
-        //     }
-        //     None => {
-        //         info!("Meeting Sign timer is not running");
-        //     }
-        // }
+        {
+            let mut cps = control_panel_state.lock().await;
+            cps.check_meeting_sign_timer().unwrap();
+            cps.display.flush().unwrap();
+        }
 
         ticker.next().await;
     }

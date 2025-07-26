@@ -17,7 +17,6 @@ A MCU like an ESP32-C3 enables a fancier interface with a 0.96" OLED screen.
 
 #### HDMI Switch
 
-
 The voltages of the switch pins are as follows:
 
 ```
@@ -43,6 +42,7 @@ With the stock switch:
   └─────┘         └─────┘
 
 ```
+
 ```
 With the stock switch removed:
           ┌─────┐
@@ -55,6 +55,7 @@ With the stock switch removed:
 └─┌─────┐─────────┌─────┐─┘
   └─────┘         └─────┘
 ```
+
 ```
 Switch pin numbers:
           ┌─────┐
@@ -136,10 +137,10 @@ This implementation will remain the same as this simple analog switching is work
 > The toggle switches are sufficient state UI and therefore does not require monitoring by the ESP32-C3.
 
 - [x] Refine design of enclosure
-    - Orient inputs and outputs on the same side
-    - Use PETG instead of PLA for better durability
-    - Use fuzzy skin to camouflage layer lines for improved aesthetics
-- [~] Redo connections to use hot-swappable DuPont connectors and longer, more flexible stranded wires
+  - Orient inputs and outputs on the same side
+  - Use PETG instead of PLA for better durability
+  - Use fuzzy skin to camouflage layer lines for improved aesthetics
+- [x] Redo connections to use hot-swappable DuPont connectors and longer, more flexible stranded wires
 
 #### USB Power
 
@@ -163,18 +164,18 @@ An [existing project](https://github.com/noahbaculi/embedded-meeting-sign) that 
 The Meeting Sign will be powered via one of the USB Power MOSFETs controlled by the MCU.
 
 - [x] Rewrite firmware
-    - [x] Use the ESP32-C3 instead of the Arduino Nano in order to use consistent `esp-hal` and `embassy` tooling
-    - [x] Allow the timer to be controlled via UART
-    - [x] If no UART commands are received, there should be a default timer
-    - [x] There should be a `SENSE` connection between the Meeting Sign ESP32-C3 and the Control Panel ESP32-C3 that allows the Control Panel to detect if the Meeting Sign is online
-        - This can be a Meeting Sign output that is set high when the Meeting Sign is online and low when it is not
-        - The Control Panel can use this signal on an input with a pull-down resistor to determine if the Meeting Sign is online and display the status on the OLED screen
-    - [x] Once a timer completes, the ESP32-C3 should go into deep sleep
-    - [ ] Archive the previous version of the repository with a link to this new version
+  - [x] Use the ESP32-C3 instead of the Arduino Nano in order to use consistent `esp-hal` and `embassy` tooling
+  - [x] Allow the timer to be controlled via UART
+  - [x] If no UART commands are received, there should be a default timer
+  - [x] There should be a `SENSE` connection between the Meeting Sign ESP32-C3 and the Control Panel ESP32-C3 that allows the Control Panel to detect if the Meeting Sign is online
+    - This can be a Meeting Sign output that is set high when the Meeting Sign is online and low when it is not
+    - The Control Panel can use this signal on an input with a pull-down resistor to determine if the Meeting Sign is online and display the status on the OLED screen
+  - [x] Once a timer completes, the ESP32-C3 should go into deep sleep
+  - [ ] Archive the previous version of the repository with a link to this new version
 - [x] Refine design of enclosure
-    - [x] Shrink footprint thanks to smaller size of the ESP32-C3
-    - [x] Use USB-C socket instead of Arduino Nano's micro USB for power
-    - [x] Use power switch for manual operation if not using the Meeting Sign with the Control Panel
+  - [x] Shrink footprint thanks to smaller size of the ESP32-C3
+  - [x] Use USB-C socket instead of Arduino Nano's micro USB for power
+  - [x] Use power switch for manual operation if not using the Meeting Sign with the Control Panel
 
 ### Important Concepts
 
@@ -193,11 +194,17 @@ The Meeting Sign will be powered via one of the USB Power MOSFETs controlled by 
 This project is built in a `no_std` environment utilizing the `esp-hal` crate in conjunction with the [Embassy](https://embassy.dev/) framework.
 
 <!-- - Rust via [rustup](https://rustup.rs/) -->
+
 <!-- - Install [ESP32 Rust tooling](https://docs.esp-rs.org/book/installation/index.html) -->
+
 <!---->
+
 <!-- ```shell -->
+
 <!-- cargo install espup -->
+
 <!-- espup install -->
+
 <!-- ``` -->
 
 ### Commands

@@ -226,8 +226,11 @@ impl ControlPanelState {
                     let ratio =
                         ProgressRatio::from_durations(&(end - now), &MEETING_SIGN_MAX_DURATION)
                             .unwrap();
-                    info!("Meeting Sign timer is running with ratio={:?}", ratio);
                     remaining = Some(end - now);
+                    info!(
+                        "Meeting Sign timer is running with ratio={ratio:?}, remaining={}s",
+                        remaining.unwrap().as_secs()
+                    );
                 }
             }
         };
@@ -594,7 +597,7 @@ impl MeetingSignUI {
     );
     const TIME_REMAINING_BOUNDING_BOX: Rectangle = Rectangle::new(
         Point::new(
-            Self::TIME_REMAINIG_PT.x - (Self::TIME_REMAINING_SIZE.width as i32 / 2),
+            Self::TIME_REMAINIG_PT.x - (Self::TIME_REMAINING_SIZE.width as i32 / 2) + 1,
             Self::TIME_REMAINIG_PT.y,
         ),
         Size::new(
@@ -647,11 +650,6 @@ impl MeetingSignUI {
                     Self::TIME_REMAINIG_PT,
                     Self::TIME_REMAINING_STYLE,
                     Self::CENTER_ALIGNED,
-                );
-                error!(
-                    "Time remaining bounding box: {:?} vs {:?}",
-                    time_remaining.bounding_box(),
-                    Self::TIME_REMAINING_BOUNDING_BOX
                 );
                 time_remaining.draw(target)?;
 
