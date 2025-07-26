@@ -5,10 +5,10 @@
     reason = "mem::forget is generally not safe to do with esp_hal types, especially those \
     holding buffers for the duration of a data transfer."
 )]
-#![allow(unused_imports)]
 
 use desk_control_panel::control_panel::state::{
-    ControlPanelState, MovementDirection, UISection, UISelectionMode, USBSwitchState,
+    ControlPanelState, MeetingSignState, MovementDirection, UISection, UISelectionMode,
+    USBSwitchState,
 };
 use desk_control_panel::meeting_duration::MeetingDuration;
 use desk_control_panel::meeting_instruction::{self, MeetingSignInstruction};
@@ -16,13 +16,9 @@ use embassy_executor::Spawner;
 use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
+use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Ticker, Timer};
-use embedded_graphics::primitives::{Line, Polyline};
-use embedded_graphics::{
-    pixelcolor::BinaryColor,
-    prelude::*,
-    primitives::{PrimitiveStyle, Rectangle},
-};
+use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull};
@@ -42,6 +38,8 @@ use static_cell::StaticCell;
 
 type StateMutex = Mutex<CriticalSectionRawMutex, ControlPanelState>;
 static STATE_MUTEX: StaticCell<StateMutex> = StaticCell::new();
+
+static MEETING_SIGN_STATE: Signal<CriticalSectionRawMutex, MeetingSignState> = Signal::new();
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -198,12 +196,12 @@ async fn monitor_rotary_encoder_rotation(
         match direction {
             Direction::Clockwise => {
                 let mut cps = control_panel_state.lock().await;
-                cps.rotary_encoder_rotate(MovementDirection::Clockwise);
+                cps.rotary_encoder_rotate(&MEETING_SIGN_STATE, MovementDirection::Clockwise);
                 cps.display.flush().unwrap();
             }
             Direction::CounterClockwise => {
                 let mut cps = control_panel_state.lock().await;
-                cps.rotary_encoder_rotate(MovementDirection::CounterClockwise);
+                cps.rotary_encoder_rotate(&MEETING_SIGN_STATE, MovementDirection::CounterClockwise);
                 cps.display.flush().unwrap();
             }
             Direction::None => {}
@@ -283,15 +281,36 @@ async fn monitor_usb_switch_leds(
 #[embassy_executor::task]
 async fn monitor_meeting_sign_timer(control_panel_state: &'static StateMutex) {
     debug!("Starting monitor_meeting_sign_timer task");
-    let mut ticker = Ticker::every(Duration::from_secs(10));
     loop {
-        {
-            let mut cps = control_panel_state.lock().await;
-            cps.check_meeting_sign_timer().unwrap();
-            cps.display.flush().unwrap();
-        }
+        match MEETING_SIGN_STATE.wait().await {
+            MeetingSignState::On => {
+                let mut ticker = Ticker::every(Duration::from_secs(30));
+                loop {
+                    let meeting_sign_completion = {
+                        let mut cps = control_panel_state.lock().await;
+                        cps.check_meeting_sign_timer(&MEETING_SIGN_STATE).unwrap();
+                        cps.display.flush().unwrap();
+                        cps.meeting_sign_completion
+                    };
 
-        ticker.next().await;
+                    // Break out of the loop when the timer is no longer active
+                    if meeting_sign_completion.is_none() {
+                        info!("monitor_meeting_sign_timer - Timer completed, exiting monitoring loop at {:?}", Instant::now());
+                        break;
+                    }
+
+                    ticker.next().await;
+                }
+            }
+            MeetingSignState::Off => {
+                info!("monitor_meeting_sign_timer - Meeting sign is off, continuing to wait");
+            }
+            MeetingSignState::Disconnected => {
+                info!(
+                    "monitor_meeting_sign_timer - Meeting sign is disconnected, continuing to wait"
+                );
+            }
+        }
     }
 }
 

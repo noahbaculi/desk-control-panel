@@ -1,5 +1,6 @@
 use crate::meeting_instruction::ProgressRatio;
 use core::fmt::Write;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant};
 use embedded_graphics::{
     mono_font::{ascii, MonoFont, MonoTextStyle},
@@ -47,7 +48,11 @@ pub enum MovementDirection {
     CounterClockwise,
 }
 impl ControlPanelState {
-    pub fn rotary_encoder_rotate(&mut self, direction: MovementDirection) {
+    pub fn rotary_encoder_rotate(
+        &mut self,
+        meeting_sign_state: &Signal<CriticalSectionRawMutex, MeetingSignState>,
+        direction: MovementDirection,
+    ) {
         match self.ui_selection_mode {
             UISelectionMode::Menu => {
                 match direction {
@@ -70,7 +75,8 @@ impl ControlPanelState {
                         .unwrap();
                 }
                 UISection::MeetingSign => {
-                    self.process_meeting_sign_change(direction).unwrap();
+                    self.process_meeting_sign_change(meeting_sign_state, direction)
+                        .unwrap();
                 }
             },
         };
@@ -78,6 +84,7 @@ impl ControlPanelState {
 
     fn process_meeting_sign_change(
         &mut self,
+        meeting_sign_state: &Signal<CriticalSectionRawMutex, MeetingSignState>,
         direction: MovementDirection,
     ) -> Result<(), <DisplayType as DrawTarget>::Error> {
         let now = Instant::now();
@@ -86,7 +93,7 @@ impl ControlPanelState {
             (MovementDirection::Clockwise, None) => {
                 self.meeting_sign_power.set_high();
                 self.meeting_sign_completion = Some(now + MEETING_SIGN_INTERVAL);
-                self.check_meeting_sign_timer()?;
+                self.check_meeting_sign_timer(meeting_sign_state)?;
                 info!("Starting meeting sign timer from None");
             }
             (MovementDirection::Clockwise, Some(end)) => {
@@ -100,7 +107,7 @@ impl ControlPanelState {
 
                 self.meeting_sign_power.set_high();
                 self.meeting_sign_completion = Some(proposed_end);
-                self.check_meeting_sign_timer()?;
+                self.check_meeting_sign_timer(meeting_sign_state)?;
                 info!("Meeting sign timer increased",);
             }
             (MovementDirection::CounterClockwise, None) => {
@@ -118,7 +125,7 @@ impl ControlPanelState {
                         MEETING_SIGN_INTERVAL.as_secs()
                     );
                 }
-                self.check_meeting_sign_timer()?;
+                self.check_meeting_sign_timer(meeting_sign_state)?;
             }
         };
         Ok(())
@@ -189,7 +196,10 @@ impl ControlPanelState {
         self.usb_switch_state.draw(&mut self.display).unwrap();
     }
 
-    pub fn check_meeting_sign_timer(&mut self) -> Result<(), <DisplayType as DrawTarget>::Error> {
+    pub fn check_meeting_sign_timer(
+        &mut self,
+        meeting_sign_state: &Signal<CriticalSectionRawMutex, MeetingSignState>,
+    ) -> Result<(), <DisplayType as DrawTarget>::Error> {
         let now = Instant::now();
         let mut remaining = None;
 
@@ -197,7 +207,9 @@ impl ControlPanelState {
             self.meeting_sign_power.output_level(),
             self.meeting_sign_completion,
         ) {
-            (Level::Low, None) => {}
+            (Level::Low, None) => {
+                meeting_sign_state.signal(MeetingSignState::Off);
+            }
             (Level::Low, Some(_)) => {
                 error!("Meeting Sign is not on, but completion is set to something");
                 // This should not happen, but if it does, we can reset the state
@@ -207,18 +219,20 @@ impl ControlPanelState {
                 error!("Meeting Sign is on, but completion is None");
                 // This should not happen, but if it does, we can reset the state
                 self.meeting_sign_power.set_low();
-                self.meeting_sign_completion = None;
             }
             (Level::High, Some(end)) => {
                 if end < now {
                     self.meeting_sign_power.set_low();
                     self.meeting_sign_completion = None;
+                    meeting_sign_state.signal(MeetingSignState::Off);
                     info!("Meeting Sign timer has completed");
                 } else {
                     let ratio =
                         ProgressRatio::from_durations(&(end - now), &MEETING_SIGN_MAX_DURATION)
                             .unwrap();
                     remaining = Some(end - now);
+
+                    meeting_sign_state.signal(MeetingSignState::On);
                     info!(
                         "Meeting Sign timer is running with ratio={ratio:?}, remaining={}s",
                         remaining.unwrap().as_secs()
