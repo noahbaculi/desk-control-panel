@@ -39,6 +39,7 @@ use static_cell::StaticCell;
 type StateMutex = Mutex<CriticalSectionRawMutex, ControlPanelState>;
 static STATE_MUTEX: StaticCell<StateMutex> = StaticCell::new();
 
+// This signal is used to efficiently monitor the state of the Meeting Sign timer only when the Meeting Sign is active.
 static MEETING_SIGN_STATE: Signal<CriticalSectionRawMutex, MeetingSignState> = Signal::new();
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
