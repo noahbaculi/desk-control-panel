@@ -7,7 +7,7 @@
 )]
 
 use desk_control_panel::meeting_instruction::{
-    self, MeetingSignInstruction, ProgressRatio, UART_COMMUNICATION_TIMEOUT,
+    self, MeetingSignInstruction, ProgressRatio, COBS_DELIMITER, UART_COMMUNICATION_TIMEOUT,
 };
 use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
@@ -171,10 +171,15 @@ async fn main(spawner: Spawner) {
                     info!("State changed to Uart.");
                     match instruction {
                         MeetingSignInstruction::On(progress_ratio) => {
-                            leds.lock().await.set_ratio_low(progress_ratio)
+                            leds.lock().await.set_ratio_low(progress_ratio);
                         }
                         MeetingSignInstruction::Off => {
-                            leds.lock().await.set_ratio_low(ProgressRatio(0))
+                            leds.lock().await.set_pattern_array(&[false; NUM_LEDS]);
+                        }
+                        MeetingSignInstruction::Error => {
+                            leds.lock().await.set_pattern_array(&[
+                                true, false, false, false, false, false, false, false, true,
+                            ]);
                         }
                     }
 
@@ -213,7 +218,7 @@ impl<'a> LEDs<'a> {
         Self { led_outs }
     }
 
-    /// Set the portion of LEDs to low based on the given numerator and denominator.
+    /// Set the portion of LEDs to low based on the given ProgressRatio
     pub fn set_ratio_low(&mut self, ratio: ProgressRatio) {
         let num_on_leds = ratio.apply_to(NUM_LEDS);
 
@@ -226,7 +231,7 @@ impl<'a> LEDs<'a> {
         }
     }
 
-    pub fn _set_pattern_array(&mut self, pattern: &[bool; NUM_LEDS]) {
+    pub fn set_pattern_array(&mut self, pattern: &[bool; NUM_LEDS]) {
         for (led, &should_be_on) in self.led_outs.iter_mut().zip(pattern.iter()) {
             if should_be_on {
                 led.set_high();
@@ -290,7 +295,9 @@ async fn uart_reader(
                 trace!("Read {len} bytes, total buffer: {offset}");
 
                 // Look for delimiter
-                if let Some(delimiter_pos) = read_buf[..offset].iter().position(|&b| b == 0x00) {
+                if let Some(delimiter_pos) =
+                    read_buf[..offset].iter().position(|&b| b == COBS_DELIMITER)
+                {
                     let encoded_data = &read_buf[..delimiter_pos];
                     trace!("Received encoded data: {encoded_data:?}");
 

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use core::ops::{Div, Mul};
 use defmt::Format;
 use embassy_time::Duration;
@@ -8,8 +6,7 @@ use serde::{Deserialize, Serialize};
 
 // fifo_full_threshold (RX)
 pub const READ_BUF_SIZE: usize = 64;
-// EOT (CTRL-D)
-pub const AT_CMD: u8 = 0x04;
+pub const COBS_DELIMITER: u8 = 0x00;
 
 const UART_INTERVAL_MS: u64 = 500;
 pub const UART_COMMUNICATION_INTERVAL: Duration = Duration::from_millis(UART_INTERVAL_MS);
@@ -57,6 +54,7 @@ impl ProgressRatio {
 pub enum MeetingSignInstruction {
     On(ProgressRatio),
     Off,
+    Error,
 }
 
 // Max postcard serialized size

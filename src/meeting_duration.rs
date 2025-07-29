@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use defmt::Format;
 use embassy_time::Duration;
 use thiserror::Error;

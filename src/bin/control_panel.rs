@@ -11,7 +11,9 @@ use desk_control_panel::control_panel::state::{
     USBSwitchState,
 };
 use desk_control_panel::meeting_duration::MeetingDuration;
-use desk_control_panel::meeting_instruction::{self, MeetingSignInstruction};
+use desk_control_panel::meeting_instruction::{
+    self, MeetingSignInstruction, COBS_DELIMITER, UART_COMMUNICATION_INTERVAL,
+};
 use embassy_executor::Spawner;
 use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -29,8 +31,8 @@ use esp_hal::{
     uart::{Config, RxConfig, Uart},
     Async,
 };
-use log::LevelFilter;
 use log::{debug, info};
+use log::{error, LevelFilter};
 use rotary_encoder_hal::{Direction, Rotary};
 use ssd1306::mode::DisplayConfig;
 use ssd1306::{I2CDisplayInterface, Ssd1306};
@@ -149,7 +151,9 @@ async fn main(spawner: Spawner) {
         .unwrap()
         .with_tx(meeting_sign_uart_pin)
         .into_async();
-    spawner.spawn(writer(meeting_sign_uart)).ok();
+    spawner
+        .spawn(writer(meeting_sign_uart, control_panel_state))
+        .ok();
 
     let rotary_encoder_button = Input::new(peripherals.GPIO2, InputConfig::default());
     info!(
@@ -316,7 +320,7 @@ async fn monitor_meeting_sign_timer(control_panel_state: &'static StateMutex) {
 }
 
 #[embassy_executor::task]
-async fn writer(mut uart: Uart<'static, Async>) {
+async fn writer(mut uart: Uart<'static, Async>, control_panel_state: &'static StateMutex) {
     debug!("Starting UART writer task");
 
     // Buffers sized appropriately for the MeetingInstruction payload
@@ -324,40 +328,57 @@ async fn writer(mut uart: Uart<'static, Async>) {
     let mut encode_buf = [0u8; meeting_instruction::MAX_ENCODED_SIZE];
 
     loop {
-        for num_minutes in 1..=120 {
-            let duration =
-                MeetingDuration::from_minutes(num_minutes).expect("Could not create duration");
-            let payload = MeetingSignInstruction::On(
-                meeting_instruction::ProgressRatio::from_durations(
-                    &duration.into(),
-                    &MeetingDuration::MAX.into(),
-                )
-                .expect("Invalid progress ratio"),
-            );
+        let payload = {
+            match control_panel_state.lock().await.meeting_sign_completion {
+                None => MeetingSignInstruction::Off,
+                Some(end) => {
+                    // If the Meeting Sign is active, use the remaining time
+                    let duration_remaining =
+                        Duration::from(MeetingDuration::MAX) - (end - Instant::now());
+                    match MeetingDuration::new(duration_remaining) {
+                        Err(_) => {
+                            error!("Failed to create meeting duration: {duration_remaining:?}");
+                            MeetingSignInstruction::Error
+                        }
+                        Ok(meeting_duration) => {
+                            match meeting_instruction::ProgressRatio::from_durations(
+                                &meeting_duration.into(),
+                                &MeetingDuration::MAX.into(),
+                            ) {
+                                None => {
+                                    error!(
+                                        "Invalid progress ratio for meeting duration: {meeting_duration:?}"
+                                    );
+                                    MeetingSignInstruction::Error
+                                }
+                                Some(progress_ratio) => MeetingSignInstruction::On(progress_ratio),
+                            }
+                        }
+                    }
+                }
+            }
+        };
 
-            // Serialize the payload
-            let serialized = postcard::to_slice(&payload, &mut serialize_buf).unwrap();
-            let serialized_len = serialized.len();
+        // Serialize the payload
+        let serialized = postcard::to_slice(&payload, &mut serialize_buf).unwrap();
+        let serialized_len = serialized.len();
 
-            // COBS encode
-            let encoded_len = cobs::encode(serialized, &mut encode_buf);
+        // COBS encode
+        let encoded_len = cobs::encode(serialized, &mut encode_buf);
 
-            debug!("{:?}", &duration);
-            debug!("Serialized: {serialized_len} bytes, Encoded: {encoded_len} bytes");
-            debug!(
-                "Minutes: {:?} | Instruction: {:?} | Raw data: {:?} | Encoded data: {:?}",
-                num_minutes,
-                payload,
-                &serialized,
-                &encode_buf[..encoded_len]
-            );
+        debug!("Serialized: {serialized_len} bytes, Encoded: {encoded_len} bytes");
+        debug!(
+            "Instruction: {:?} | Raw data: {:?} | Encoded data: {:?}",
+            payload,
+            &serialized,
+            &encode_buf[..encoded_len]
+        );
 
-            // Send encoded data + null delimiter
-            uart.write_async(&encode_buf[..encoded_len]).await.unwrap();
-            uart.write_async(&[0x00]).await.unwrap();
-            embedded_io_async::Write::flush(&mut uart).await.unwrap();
+        // Send encoded data + null delimiter
+        uart.write_async(&encode_buf[..encoded_len]).await.unwrap();
+        uart.write_async(&[COBS_DELIMITER]).await.unwrap();
+        embedded_io_async::Write::flush(&mut uart).await.unwrap();
 
-            Timer::after(Duration::from_millis(100)).await;
-        }
+        Timer::after(UART_COMMUNICATION_INTERVAL).await;
     }
 }
