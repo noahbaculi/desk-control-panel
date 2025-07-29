@@ -134,7 +134,7 @@ async fn main(spawner: Spawner) {
 
     let rx_pin = peripherals.GPIO2;
     let uart_config = Config::default().with_rx(
-        RxConfig::default().with_fifo_full_threshold(meeting_instruction::READ_BUF_SIZE as u16),
+        RxConfig::default().with_fifo_full_threshold(meeting_instruction::FIFO_THRESHOLD as u16),
     );
     let uart = Uart::new(peripherals.UART0, uart_config)
         .unwrap()
@@ -147,6 +147,7 @@ async fn main(spawner: Spawner) {
         .ok();
 
     let mut loop_timeout_duration = UART_COMMUNICATION_TIMEOUT;
+    let mut last_progress_ratio = ProgressRatio(0);
 
     // Main loop
     loop {
@@ -171,7 +172,11 @@ async fn main(spawner: Spawner) {
                     info!("State changed to Uart.");
                     match instruction {
                         MeetingSignInstruction::On(progress_ratio) => {
-                            leds.lock().await.set_ratio_low(progress_ratio);
+                            // Only update if the ratio has changed
+                            if progress_ratio != last_progress_ratio {
+                                leds.lock().await.set_ratio_low(&progress_ratio);
+                                last_progress_ratio = progress_ratio;
+                            }
                         }
                         MeetingSignInstruction::Off => {
                             leds.lock().await.set_pattern_array(&[false; NUM_LEDS]);
@@ -219,7 +224,7 @@ impl<'a> LEDs<'a> {
     }
 
     /// Set the portion of LEDs to low based on the given ProgressRatio
-    pub fn set_ratio_low(&mut self, ratio: ProgressRatio) {
+    pub fn set_ratio_low(&mut self, ratio: &ProgressRatio) {
         let num_on_leds = ratio.apply_to(NUM_LEDS);
 
         for (led_idx, led) in self.led_outs.iter_mut().enumerate() {
@@ -270,7 +275,7 @@ impl<'a> LEDs<'a> {
                 .expect("Failed to calculate ratio from durations");
             debug!("Setting LEDs based on ratio: {ratio:?}");
             // Set LEDs based on the portion
-            self.set_ratio_low(ratio);
+            self.set_ratio_low(&ratio);
         }
     }
 }
@@ -307,15 +312,24 @@ async fn uart_reader(
                             trace!("Decoded data: {decoded_data:?}");
                             match postcard::from_bytes::<MeetingSignInstruction>(decoded_data) {
                                 Ok(instruction) => {
-                                    debug!("Received: {instruction:?}");
+                                    debug!(
+                                        "Received: {instruction:?} @ {}ms",
+                                        Instant::now().as_millis()
+                                    );
                                     state_publisher
                                         .publish_immediate(MeetingSignState::Uart(instruction));
                                 }
-                                Err(e) => warn!("Deserialization error: {e:?}"),
+                                Err(e) => warn!(
+                                    "Deserialization error: {e:?} @ {}ms",
+                                    Instant::now().as_millis()
+                                ),
                             }
                         }
                         Err(e) => {
-                            warn!("COBS decode error: {e:?}");
+                            warn!(
+                                "COBS decode error: {e:?} @ {}ms",
+                                Instant::now().as_millis()
+                            );
                         }
                     }
                     offset = 0; // Reset after processing
@@ -326,7 +340,10 @@ async fn uart_reader(
 
         // Prevent buffer overflow
         if offset >= meeting_instruction::RX_BUFFER_SIZE - 1 {
-            warn!("Buffer overflow, resetting");
+            warn!(
+                "Buffer overflow, resetting @ {}ms",
+                Instant::now().as_millis()
+            );
             offset = 0;
         }
     }

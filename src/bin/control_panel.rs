@@ -145,7 +145,7 @@ async fn main(spawner: Spawner) {
 
     let meeting_sign_uart_pin = peripherals.GPIO7;
     let meeting_sign_uart_config = Config::default().with_rx(
-        RxConfig::default().with_fifo_full_threshold(meeting_instruction::READ_BUF_SIZE as u16),
+        RxConfig::default().with_fifo_full_threshold(meeting_instruction::FIFO_THRESHOLD as u16),
     );
     let meeting_sign_uart = Uart::new(peripherals.UART0, meeting_sign_uart_config)
         .unwrap()

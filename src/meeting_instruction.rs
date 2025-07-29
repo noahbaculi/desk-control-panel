@@ -4,10 +4,6 @@ use embassy_time::Duration;
 use num_traits::{PrimInt, Unsigned};
 use serde::{Deserialize, Serialize};
 
-// fifo_full_threshold (RX)
-pub const READ_BUF_SIZE: usize = 64;
-pub const COBS_DELIMITER: u8 = 0x00;
-
 const UART_INTERVAL_MS: u64 = 500;
 pub const UART_COMMUNICATION_INTERVAL: Duration = Duration::from_millis(UART_INTERVAL_MS);
 pub const UART_COMMUNICATION_TIMEOUT: Duration = Duration::from_millis(4 * UART_INTERVAL_MS);
@@ -62,4 +58,9 @@ pub const MAX_PAYLOAD_SIZE: usize = 4;
 // Max COBS encoded size
 pub const MAX_ENCODED_SIZE: usize = MAX_PAYLOAD_SIZE + (MAX_PAYLOAD_SIZE / 254) + 1;
 // Buffer size to contain multiple encoded payloads
-pub const RX_BUFFER_SIZE: usize = MAX_ENCODED_SIZE * 4;
+pub const RX_BUFFER_SIZE: usize = MAX_ENCODED_SIZE * 8;
+
+pub const FIFO_THRESHOLD: usize = MAX_ENCODED_SIZE * 2;
+
+// Standard COBS delimiter byte
+pub const COBS_DELIMITER: u8 = 0x00;
