@@ -19,7 +19,7 @@ use esp_hal::{
     Blocking,
 };
 use heapless::String;
-use log::{error, info};
+use log::{error, info, warn};
 use ssd1306::{
     mode::BufferedGraphicsMode, prelude::I2CInterface, size::DisplaySize128x64, Ssd1306,
 };
@@ -33,6 +33,7 @@ pub struct ControlPanelState {
     pub usb_switch_state: USBSwitchState,
     pub usb_power_1: Output<'static>,
     pub usb_power_2: Output<'static>,
+    pub meeting_sign_sense: Input<'static>,
     pub meeting_sign_power: Output<'static>,
     pub meeting_sign_completion: Option<Instant>,
     pub ui_selection_mode: UISelectionMode,
@@ -202,6 +203,16 @@ impl ControlPanelState {
     ) -> Result<(), <DisplayType as DrawTarget>::Error> {
         let now = Instant::now();
         let mut remaining = None;
+
+        if self.meeting_sign_sense.is_low() {
+            // If the sense is low, we should not be checking the meeting sign timer
+            warn!("Attempted to check Meeting Sign timer when Sense is Low");
+            self.meeting_sign_power.set_low();
+            self.meeting_sign_completion = None;
+            meeting_sign_state.signal(MeetingSignState::Disconnected);
+            MeetingSignUI.draw_disconnected(&mut self.display)?;
+            return Ok(());
+        };
 
         match (
             self.meeting_sign_power.output_level(),
@@ -627,6 +638,27 @@ impl MeetingSignUI {
         Self::PROGRESS_CORNER_RADIUS,
     );
     const BAR_ON_STYLE: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_fill(BinaryColor::On);
+
+    pub fn draw_disconnected<D: DrawTarget<Color = BinaryColor>>(
+        &self,
+        target: &mut D,
+    ) -> Result<(), D::Error> {
+        Self::FULL_PROGRESS_SHAPE
+            .draw_styled(&PrimitiveStyle::with_fill(BinaryColor::Off), target)?;
+
+        Self::TIME_REMAINING_BOUNDING_BOX
+            .draw_styled(&PrimitiveStyle::with_fill(BinaryColor::Off), target)?;
+
+        Text::with_text_style(
+            "X",
+            Self::TIME_REMAINIG_PT,
+            Self::TIME_REMAINING_STYLE,
+            Self::CENTER_ALIGNED,
+        )
+        .draw(target)?;
+
+        Ok(())
+    }
 
     pub fn draw_progress<D: DrawTarget<Color = BinaryColor>>(
         &self,

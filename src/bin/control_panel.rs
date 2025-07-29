@@ -116,6 +116,7 @@ async fn main(spawner: Spawner) {
         usb_switch_state,
         usb_power_1,
         usb_power_2,
+        meeting_sign_sense,
         meeting_sign_power,
         ui_selection_mode: UISelectionMode::Menu,
         ui_section: UISection::MeetingSign,
@@ -127,13 +128,6 @@ async fn main(spawner: Spawner) {
         cps.draw_entire_ui().unwrap();
         cps.display.flush().unwrap();
     }
-
-    spawner
-        .spawn(monitor_meeting_sign_sense(
-            meeting_sign_sense,
-            control_panel_state,
-        ))
-        .ok();
 
     spawner
         .spawn(monitor_usb_switch_leds(
@@ -236,27 +230,6 @@ async fn monitor_rotary_encoder_button(
 
         // Debounce the button press
         Timer::after(Duration::from_millis(200)).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn monitor_meeting_sign_sense(
-    mut digital_input: Input<'static>,
-    _control_panel_state: &'static StateMutex,
-) {
-    debug!("Starting monitor_meeting_sign_sense task");
-    loop {
-        digital_input.wait_for_any_edge().await;
-        // Debounce the change
-        Timer::after(Duration::from_millis(100)).await;
-
-        info!("Meeting Sign sense changed to {:?}", digital_input.level());
-
-        // control_panel_state
-        //     .lock()
-        //     .await
-        //     .draw_usb_switch_ui()
-        //     .unwrap();
     }
 }
 
