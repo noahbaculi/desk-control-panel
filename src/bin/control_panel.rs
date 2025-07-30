@@ -15,7 +15,7 @@ use desk_control_panel::meeting_instruction::{
     self, MeetingSignInstruction, COBS_DELIMITER, UART_COMMUNICATION_INTERVAL,
 };
 use embassy_executor::Spawner;
-use embassy_futures::select::select;
+use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
@@ -25,6 +25,9 @@ use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull};
 use esp_hal::i2c::master::I2c;
+use esp_hal::peripherals::LPWR;
+use esp_hal::rtc_cntl::sleep::{GpioWakeupSource, RtcioWakeupSource, WakeupLevel};
+use esp_hal::rtc_cntl::Rtc;
 use esp_hal::time::Rate;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::{
@@ -44,6 +47,9 @@ static STATE_MUTEX: StaticCell<StateMutex> = StaticCell::new();
 // This signal is used to efficiently monitor the state of the Meeting Sign timer only when the Meeting Sign is active.
 static MEETING_SIGN_STATE: Signal<CriticalSectionRawMutex, MeetingSignState> = Signal::new();
 
+// This signal is used to delay the sleep timer task when inputs are received.
+static SLEEP_TIMER_EXTENSION_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -54,7 +60,7 @@ async fn main(spawner: Spawner) {
     esp_println::logger::init_logger(LevelFilter::Info);
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
-    let peripherals = esp_hal::init(config);
+    let mut peripherals = esp_hal::init(config);
 
     let timer0 = SystemTimer::new(peripherals.SYSTIMER);
     esp_hal_embassy::init(timer0.alarm0);
@@ -149,7 +155,8 @@ async fn main(spawner: Spawner) {
         .spawn(writer(meeting_sign_uart, control_panel_state))
         .ok();
 
-    let rotary_encoder_button = Input::new(peripherals.GPIO2, InputConfig::default());
+    let mut gpio2 = peripherals.GPIO2;
+    let rotary_encoder_button = Input::new(gpio2, InputConfig::default());
     info!(
         "Rotary encoder button is {:?}!",
         rotary_encoder_button.level()
@@ -180,6 +187,18 @@ async fn main(spawner: Spawner) {
     spawner
         .spawn(monitor_meeting_sign_timer(control_panel_state))
         .ok();
+
+    let wakeup_pins: &mut [(&mut dyn esp_hal::gpio::RtcPinWithResistors, WakeupLevel)] = &mut [
+        // (&mut gpio2, WakeupLevel::High),
+    ];
+    let rtcio_wakeup_source = RtcioWakeupSource::new(wakeup_pins);
+
+    let low_power_peripheral = peripherals.LPWR;
+    spawner.must_spawn(sleep_timer(
+        low_power_peripheral,
+        rtcio_wakeup_source,
+        control_panel_state,
+    ));
 }
 
 #[embassy_executor::task]
@@ -282,6 +301,9 @@ async fn monitor_meeting_sign_timer(control_panel_state: &'static StateMutex) {
             }
             MeetingSignState::Off => {
                 info!("monitor_meeting_sign_timer - Meeting sign is off, continuing to wait");
+                // TODO: kick off sleep timer here? Want the control panel to sleep when the
+                // Meeting Sign has been Off for 5 minutes. But any other input should reset the 5
+                // min timer.
             }
             MeetingSignState::Disconnected => {
                 info!(
@@ -353,5 +375,41 @@ async fn writer(mut uart: Uart<'static, Async>, control_panel_state: &'static St
         embedded_io_async::Write::flush(&mut uart).await.unwrap();
 
         Timer::after(UART_COMMUNICATION_INTERVAL).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn sleep_timer(
+    low_power_peripheral: LPWR<'static>,
+    rtcio_wakeup_source: RtcioWakeupSource<'static, 'static>,
+    control_panel_state: &'static StateMutex,
+) {
+    debug!("Starting sleep_timer task");
+    let mut rtc = Rtc::new(low_power_peripheral);
+    loop {
+        match select(
+            SLEEP_TIMER_EXTENSION_SIGNAL.wait(),
+            // Timer::after(Duration::from_secs(60 * 5)), // 5 minutes
+            Timer::after(Duration::from_secs(10)),
+        )
+        .await
+        {
+            Either::First(_) => {
+                log::warn!("Sleep timer extension signal received, resetting sleep timer.");
+            }
+            Either::Second(_) => {
+                log::warn!("Sleep timer expired, putting control panel to sleep.");
+                let x = GpioWakeupSource::new();
+
+                {
+                    let mut cps = control_panel_state.lock().await;
+                    cps.display.clear(BinaryColor::Off).unwrap();
+                    cps.display.flush().unwrap();
+                }
+
+                // rtc.sleep_light(&[]);
+                rtc.sleep_deep(&[&rtcio_wakeup_source]);
+            }
+        };
     }
 }
