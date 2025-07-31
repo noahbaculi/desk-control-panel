@@ -83,55 +83,6 @@ impl ControlPanelState {
         };
     }
 
-    fn process_meeting_sign_change(
-        &mut self,
-        meeting_sign_state: &Signal<CriticalSectionRawMutex, MeetingSignState>,
-        direction: MovementDirection,
-    ) -> Result<(), <DisplayType as DrawTarget>::Error> {
-        let now = Instant::now();
-
-        match (direction, self.meeting_sign_completion) {
-            (MovementDirection::Clockwise, None) => {
-                self.meeting_sign_power.set_high();
-                self.meeting_sign_completion = Some(now + MEETING_SIGN_INTERVAL);
-                self.check_meeting_sign_timer(meeting_sign_state)?;
-                info!("Starting meeting sign timer from None");
-            }
-            (MovementDirection::Clockwise, Some(end)) => {
-                // If the stored end is before (less than) now, we use now as the base time
-                let proposed_end = end.max(now) + MEETING_SIGN_INTERVAL;
-
-                if proposed_end > now + MEETING_SIGN_MAX_DURATION {
-                    info!("Meeting sign timer would exceed max duration, not increasing");
-                    return Ok(());
-                }
-
-                self.meeting_sign_power.set_high();
-                self.meeting_sign_completion = Some(proposed_end);
-                self.check_meeting_sign_timer(meeting_sign_state)?;
-                info!("Meeting sign timer increased",);
-            }
-            (MovementDirection::CounterClockwise, None) => {
-                info!("Meeting sign is already off, nothing to do");
-            }
-            (MovementDirection::CounterClockwise, Some(end)) => {
-                if end - MEETING_SIGN_INTERVAL < now {
-                    self.meeting_sign_power.set_low();
-                    self.meeting_sign_completion = None;
-                    info!("Meeting sign turned off and completion set to None");
-                } else {
-                    self.meeting_sign_completion = Some(end - MEETING_SIGN_INTERVAL);
-                    info!(
-                        "Decreasing Meeting Sign timer by {}s.",
-                        MEETING_SIGN_INTERVAL.as_secs()
-                    );
-                }
-                self.check_meeting_sign_timer(meeting_sign_state)?;
-            }
-        };
-        Ok(())
-    }
-
     pub fn rotary_encoder_press(&mut self) {
         match self.ui_selection_mode {
             UISelectionMode::Menu => {
@@ -197,6 +148,54 @@ impl ControlPanelState {
         self.usb_switch_state.draw(&mut self.display).unwrap();
     }
 
+    fn process_meeting_sign_change(
+        &mut self,
+        meeting_sign_state: &Signal<CriticalSectionRawMutex, MeetingSignState>,
+        direction: MovementDirection,
+    ) -> Result<(), <DisplayType as DrawTarget>::Error> {
+        let now = Instant::now();
+
+        match (direction, self.meeting_sign_completion) {
+            (MovementDirection::Clockwise, None) => {
+                PMosfet::turn_on(&mut self.meeting_sign_power);
+                self.meeting_sign_completion = Some(now + MEETING_SIGN_INTERVAL);
+                self.check_meeting_sign_timer(meeting_sign_state)?;
+                info!("Starting meeting sign timer from None");
+            }
+            (MovementDirection::Clockwise, Some(end)) => {
+                // If the stored end is before (less than) now, we use now as the base time
+                let proposed_end = end.max(now) + MEETING_SIGN_INTERVAL;
+
+                if proposed_end > now + MEETING_SIGN_MAX_DURATION {
+                    info!("Meeting sign timer would exceed max duration, not increasing");
+                    return Ok(());
+                }
+
+                self.meeting_sign_completion = Some(proposed_end);
+                self.check_meeting_sign_timer(meeting_sign_state)?;
+                info!("Meeting sign timer increased",);
+            }
+            (MovementDirection::CounterClockwise, None) => {
+                info!("Meeting sign is already off, nothing to do");
+            }
+            (MovementDirection::CounterClockwise, Some(end)) => {
+                if end - MEETING_SIGN_INTERVAL < now {
+                    PMosfet::turn_off(&mut self.meeting_sign_power);
+                    self.meeting_sign_completion = None;
+                    info!("Meeting sign turned off and completion set to None");
+                } else {
+                    self.meeting_sign_completion = Some(end - MEETING_SIGN_INTERVAL);
+                    info!(
+                        "Decreasing Meeting Sign timer by {}s.",
+                        MEETING_SIGN_INTERVAL.as_secs()
+                    );
+                }
+                self.check_meeting_sign_timer(meeting_sign_state)?;
+            }
+        };
+        Ok(())
+    }
+
     pub fn check_meeting_sign_timer(
         &mut self,
         meeting_sign_state: &Signal<CriticalSectionRawMutex, MeetingSignState>,
@@ -204,36 +203,36 @@ impl ControlPanelState {
         let now = Instant::now();
         let mut remaining = None;
 
-        if self.meeting_sign_sense.is_low() {
-            // If the sense is low, we should not be checking the meeting sign timer
-            warn!("Attempted to check Meeting Sign timer when Sense is Low");
-            self.meeting_sign_power.set_low();
-            self.meeting_sign_completion = None;
-            meeting_sign_state.signal(MeetingSignState::Disconnected);
-            MeetingSignUI.draw_disconnected(&mut self.display)?;
-            return Ok(());
-        };
-
         match (
-            self.meeting_sign_power.output_level(),
+            PMosfet::get_power(&self.meeting_sign_power),
             self.meeting_sign_completion,
         ) {
-            (Level::Low, None) => {
+            (Power::Off, None) => {
                 meeting_sign_state.signal(MeetingSignState::Off);
             }
-            (Level::Low, Some(_)) => {
+            (Power::Off, Some(_)) => {
                 error!("Meeting Sign is not on, but completion is set to something");
                 // This should not happen, but if it does, we can reset the state
                 self.meeting_sign_completion = None;
             }
-            (Level::High, None) => {
+            (Power::On, None) => {
                 error!("Meeting Sign is on, but completion is None");
                 // This should not happen, but if it does, we can reset the state
-                self.meeting_sign_power.set_low();
+                PMosfet::turn_off(&mut self.meeting_sign_power);
             }
-            (Level::High, Some(end)) => {
+            (Power::On, Some(end)) => {
+                // if self.meeting_sign_sense.is_low() {
+                //     // If the sense is low, we should not be checking the meeting sign timer
+                //     warn!("Attempted to check Meeting Sign timer when Sense is Low");
+                //     PMosfet::turn_off(&mut self.meeting_sign_power);
+                //     self.meeting_sign_completion = None;
+                //     meeting_sign_state.signal(MeetingSignState::Disconnected);
+                //     MeetingSignUI.draw_disconnected(&mut self.display)?;
+                //     return Ok(());
+                // };
+
                 if end < now {
-                    self.meeting_sign_power.set_low();
+                    PMosfet::turn_off(&mut self.meeting_sign_power);
                     self.meeting_sign_completion = None;
                     meeting_sign_state.signal(MeetingSignState::Off);
                     info!("Meeting Sign timer has completed");
@@ -269,6 +268,29 @@ impl ControlPanelState {
             .draw_styled(&MeetingSignUI::BORDER_ON_STYLE, &mut self.display)?;
 
         Ok(())
+    }
+}
+
+#[derive(PartialEq)]
+enum Power {
+    On,
+    Off,
+}
+
+// NOTE: When using a P-Channel MOSFET, the MOSFET is "on" when the gate is low.
+struct PMosfet;
+impl PMosfet {
+    fn get_power(output: &Output<'_>) -> Power {
+        match output.output_level() {
+            Level::Low => Power::On,
+            Level::High => Power::Off,
+        }
+    }
+    fn turn_on(output: &mut Output<'_>) {
+        output.set_low();
+    }
+    fn turn_off(output: &mut Output<'_>) {
+        output.set_high();
     }
 }
 

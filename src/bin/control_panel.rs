@@ -79,7 +79,11 @@ async fn main(spawner: Spawner) {
         OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
     );
 
-    let meeting_sign_power = Output::new(peripherals.GPIO6, Level::Low, OutputConfig::default());
+    let meeting_sign_power = Output::new(
+        peripherals.GPIO6,
+        Level::High,
+        OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
+    );
     // This signal should be 3.3V high when the Meeting Sign is operating correctly
     let meeting_sign_sense = Input::new(
         peripherals.GPIO5,
@@ -151,8 +155,12 @@ async fn main(spawner: Spawner) {
         .unwrap()
         .with_tx(meeting_sign_uart_pin)
         .into_async();
+
     spawner
-        .spawn(writer(meeting_sign_uart, control_panel_state))
+        .spawn(monitor_meeting_sign_timer(
+            control_panel_state,
+            meeting_sign_uart,
+        ))
         .ok();
 
     let rotary_encoder_button = Input::new(peripherals.GPIO10, InputConfig::default());
@@ -181,10 +189,6 @@ async fn main(spawner: Spawner) {
             rotary_encoder_dt,
             control_panel_state,
         ))
-        .ok();
-
-    spawner
-        .spawn(monitor_meeting_sign_timer(control_panel_state))
         .ok();
 
     let low_power_peripheral = peripherals.LPWR;
@@ -278,27 +282,40 @@ async fn monitor_usb_switch_leds(
 }
 
 #[embassy_executor::task]
-async fn monitor_meeting_sign_timer(control_panel_state: &'static StateMutex) {
+async fn monitor_meeting_sign_timer(
+    control_panel_state: &'static StateMutex,
+    mut uart: Uart<'static, Async>,
+) {
     debug!("Starting monitor_meeting_sign_timer task");
     loop {
         match MEETING_SIGN_STATE.wait().await {
             MeetingSignState::On => {
-                let mut ticker = Ticker::every(Duration::from_secs(30));
+                let mut ui_update_ticker = Ticker::every(Duration::from_secs(30));
+                let mut uart_write_ticker = Ticker::every(UART_COMMUNICATION_INTERVAL);
                 loop {
-                    let meeting_sign_completion = {
-                        let mut cps = control_panel_state.lock().await;
-                        cps.check_meeting_sign_timer(&MEETING_SIGN_STATE).unwrap();
-                        cps.display.flush().unwrap();
-                        cps.meeting_sign_completion
-                    };
+                    let meeting_sign_completion =
+                        match select(ui_update_ticker.next(), uart_write_ticker.next()).await {
+                            Either::First(()) => {
+                                let mut cps = control_panel_state.lock().await;
+                                cps.check_meeting_sign_timer(&MEETING_SIGN_STATE).unwrap();
+                                cps.display.flush().unwrap();
+                                cps.meeting_sign_completion
+                            }
+
+                            Either::Second(()) => {
+                                let cps = control_panel_state.lock().await;
+                                write_uart(&mut uart, &cps.meeting_sign_completion).await;
+                                cps.meeting_sign_completion
+                            }
+                        };
 
                     // Break out of the loop when the timer is no longer active
                     if meeting_sign_completion.is_none() {
-                        info!("monitor_meeting_sign_timer - Timer completed, exiting monitoring loop at {:?}", Instant::now());
+                        info!(
+                            "monitor_meeting_sign_timer - Timer completed, exiting monitoring loop"
+                        );
                         break;
                     }
-
-                    ticker.next().await;
                 }
             }
             MeetingSignState::Off => {
@@ -315,68 +332,59 @@ async fn monitor_meeting_sign_timer(control_panel_state: &'static StateMutex) {
     }
 }
 
-#[embassy_executor::task]
-async fn writer(mut uart: Uart<'static, Async>, control_panel_state: &'static StateMutex) {
-    debug!("Starting UART writer task");
-
+async fn write_uart(uart: &mut Uart<'static, Async>, meeting_sign_completion: &Option<Instant>) {
     // Buffers sized appropriately for the MeetingInstruction payload
     let mut serialize_buf = [0u8; meeting_instruction::MAX_PAYLOAD_SIZE];
     let mut encode_buf = [0u8; meeting_instruction::MAX_ENCODED_SIZE];
 
-    loop {
-        let payload = {
-            match control_panel_state.lock().await.meeting_sign_completion {
-                None => MeetingSignInstruction::Off,
-                Some(end) => {
-                    // If the Meeting Sign is active, use the remaining time
-                    let duration_remaining =
-                        Duration::from(MeetingDuration::MAX) - (end - Instant::now());
-                    match MeetingDuration::new(duration_remaining) {
-                        Err(_) => {
-                            error!("Failed to create meeting duration: {duration_remaining:?}");
+    let payload = match meeting_sign_completion {
+        None => MeetingSignInstruction::Off,
+        Some(end) => {
+            // If the Meeting Sign is active, use the remaining time
+            let duration_remaining = Duration::from(MeetingDuration::MAX) - (*end - Instant::now());
+            match MeetingDuration::new(duration_remaining) {
+                Err(_) => {
+                    error!("Failed to create meeting duration: {duration_remaining:?}");
+                    MeetingSignInstruction::Error
+                }
+                Ok(meeting_duration) => {
+                    match meeting_instruction::ProgressRatio::from_durations(
+                        &meeting_duration.into(),
+                        &MeetingDuration::MAX.into(),
+                    ) {
+                        None => {
+                            error!(
+                                "Invalid progress ratio for meeting duration: {meeting_duration:?}"
+                            );
                             MeetingSignInstruction::Error
                         }
-                        Ok(meeting_duration) => {
-                            match meeting_instruction::ProgressRatio::from_durations(
-                                &meeting_duration.into(),
-                                &MeetingDuration::MAX.into(),
-                            ) {
-                                None => {
-                                    error!(
-                                        "Invalid progress ratio for meeting duration: {meeting_duration:?}"
-                                    );
-                                    MeetingSignInstruction::Error
-                                }
-                                Some(progress_ratio) => MeetingSignInstruction::On(progress_ratio),
-                            }
-                        }
+                        Some(progress_ratio) => MeetingSignInstruction::On(progress_ratio),
                     }
                 }
             }
-        };
+        }
+    };
 
-        // Serialize the payload
-        let serialized = postcard::to_slice(&payload, &mut serialize_buf).unwrap();
-        let serialized_len = serialized.len();
+    // Serialize the payload
+    let serialized = postcard::to_slice(&payload, &mut serialize_buf).unwrap();
+    let serialized_len = serialized.len();
 
-        // COBS encode
-        let encoded_len = cobs::encode(serialized, &mut encode_buf);
+    // COBS encode
+    let encoded_len = cobs::encode(serialized, &mut encode_buf);
 
-        debug!("Serialized: {serialized_len} bytes, Encoded: {encoded_len} bytes");
-        debug!(
-            "Instruction: {:?} | Raw data: {:?} | Encoded data: {:?}",
-            payload,
-            &serialized,
-            &encode_buf[..encoded_len]
-        );
+    debug!("Serialized: {serialized_len} bytes, Encoded: {encoded_len} bytes");
+    debug!(
+        "Instruction: {:?} | Raw data: {:?} | Encoded data: {:?}",
+        payload,
+        &serialized,
+        &encode_buf[..encoded_len]
+    );
 
-        // Send encoded data + null delimiter
-        uart.write_async(&encode_buf[..encoded_len]).await.unwrap();
-        uart.write_async(&[COBS_DELIMITER]).await.unwrap();
-        embedded_io_async::Write::flush(&mut uart).await.unwrap();
-
-        Timer::after(UART_COMMUNICATION_INTERVAL).await;
-    }
+    // Send encoded data + null delimiter
+    uart.write_async(&encode_buf[..encoded_len]).await.unwrap();
+    uart.write_async(&[COBS_DELIMITER]).await.unwrap();
+    // uart.flush_async().await.unwrap();
+    embedded_io_async::Write::flush(uart).await.unwrap();
 }
 
 #[embassy_executor::task]
@@ -399,10 +407,10 @@ async fn sleep_timer(
         )
         .await
         {
-            Either::First(_) => {
+            Either::First(()) => {
                 debug!("Sleep timer extension signal received, resetting sleep timer.");
             }
-            Either::Second(_) => {
+            Either::Second(()) => {
                 debug!("Sleep timer expired, checking if can control panel to sleep.");
 
                 {
