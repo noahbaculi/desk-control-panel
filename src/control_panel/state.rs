@@ -19,7 +19,7 @@ use esp_hal::{
     Blocking,
 };
 use heapless::String;
-use log::{error, info, warn};
+use log::{error, info};
 use ssd1306::{
     mode::BufferedGraphicsMode, prelude::I2CInterface, size::DisplaySize128x64, Ssd1306,
 };
@@ -66,13 +66,13 @@ impl ControlPanelState {
                 UISection::USBPower1 => {
                     self.usb_power_1.toggle();
                     USBPowerMosfet::One
-                        .draw(&mut self.display, self.usb_power_1.output_level())
+                        .draw(&mut self.display, PMosfet::get_power(&self.usb_power_1))
                         .unwrap();
                 }
                 UISection::USBPower2 => {
                     self.usb_power_2.toggle();
                     USBPowerMosfet::Two
-                        .draw(&mut self.display, self.usb_power_2.output_level())
+                        .draw(&mut self.display, PMosfet::get_power(&self.usb_power_2))
                         .unwrap();
                 }
                 UISection::MeetingSign => {
@@ -261,8 +261,8 @@ impl ControlPanelState {
         self.usb_switch_state.draw_entire_ui(&mut self.display)?;
         USBPowerMosfet::USB_POWER_1_TEXT.draw(&mut self.display)?;
         USBPowerMosfet::USB_POWER_2_TEXT.draw(&mut self.display)?;
-        USBPowerMosfet::One.draw(&mut self.display, self.usb_power_1.output_level())?;
-        USBPowerMosfet::Two.draw(&mut self.display, self.usb_power_2.output_level())?;
+        USBPowerMosfet::One.draw(&mut self.display, PMosfet::get_power(&self.usb_power_1))?;
+        USBPowerMosfet::Two.draw(&mut self.display, PMosfet::get_power(&self.usb_power_2))?;
         MeetingSignUI::TITLE_TEXT.draw(&mut self.display)?;
         MeetingSignUI::FULL_PROGRESS_SHAPE
             .draw_styled(&MeetingSignUI::BORDER_ON_STYLE, &mut self.display)?;
@@ -272,20 +272,36 @@ impl ControlPanelState {
 }
 
 #[derive(PartialEq)]
-enum Power {
+pub enum Power {
     On,
     Off,
 }
 
-// NOTE: When using a P-Channel MOSFET, the MOSFET is "on" when the gate is low.
-struct PMosfet;
+/// Wrapper for controlling a P-Channel MOSFET using GPIO output.
+///
+/// A P-Channel MOSFET is ON when the gate is LOW, and OFF when the gate is HIGH.
+/// This abstraction allows you to work in terms of `Power::On` / `Off` instead of inverted logic levels.
+pub struct PMosfet;
 impl PMosfet {
-    fn get_power(output: &Output<'_>) -> Power {
-        match output.output_level() {
+    pub fn power_to_level(power: &Power) -> Level {
+        match power {
+            Power::On => Level::Low,
+            Power::Off => Level::High,
+        }
+    }
+
+    fn level_to_power(level: Level) -> Power {
+        match level {
             Level::Low => Power::On,
             Level::High => Power::Off,
         }
     }
+
+    /// Get the current power state of the output driving a P-Channel MOSFET.
+    fn get_power(output: &Output<'_>) -> Power {
+        Self::level_to_power(output.output_level())
+    }
+
     fn turn_on(output: &mut Output<'_>) {
         output.set_low();
     }
@@ -512,17 +528,16 @@ impl USBPowerMosfet {
     pub fn draw<D: DrawTarget<Color = BinaryColor>>(
         &self,
         target: &mut D,
-        power: Level,
+        power: Power,
     ) -> Result<(), D::Error> {
         let shape = match self {
             USBPowerMosfet::One => Self::USB_POWER_1,
             USBPowerMosfet::Two => Self::USB_POWER_2,
         };
 
-        // NOTE: Since this is a P-Channel MOSFET, the MOSFET is "on" when the gate is low.
         let style = match power {
-            Level::High => Self::OFF_STYLE,
-            Level::Low => Self::ON_STYLE,
+            Power::Off => Self::OFF_STYLE,
+            Power::On => Self::ON_STYLE,
         };
         shape.draw_styled(&Self::CLEAR_STYLE, target)?;
         shape.draw_styled(&style, target)?;

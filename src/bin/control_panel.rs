@@ -7,8 +7,8 @@
 )]
 
 use desk_control_panel::control_panel::state::{
-    ControlPanelState, MeetingSignState, MovementDirection, UISection, UISelectionMode,
-    USBSwitchState,
+    ControlPanelState, MeetingSignState, MovementDirection, PMosfet, Power, UISection,
+    UISelectionMode, USBSwitchState,
 };
 use desk_control_panel::meeting_duration::MeetingDuration;
 use desk_control_panel::meeting_instruction::{
@@ -23,7 +23,7 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::{AnyPin, DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull};
+use esp_hal::gpio::{AnyPin, DriveMode, Input, InputConfig, Output, OutputConfig, Pull};
 use esp_hal::i2c::master::I2c;
 use esp_hal::peripherals::LPWR;
 use esp_hal::rtc_cntl::sleep::{RtcioWakeupSource, WakeupLevel};
@@ -67,21 +67,20 @@ async fn main(spawner: Spawner) {
 
     info!("Embassy initialized!");
 
-    // NOTE: Since this is a P-Channel MOSFET, the MOSFET is "off" when the gate is high/floating.
     let usb_power_1 = Output::new(
         peripherals.GPIO8,
-        Level::High,
+        PMosfet::power_to_level(&Power::Off),
         OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
     );
     let usb_power_2 = Output::new(
         peripherals.GPIO9,
-        Level::High,
+        PMosfet::power_to_level(&Power::Off),
         OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
     );
 
     let meeting_sign_power = Output::new(
         peripherals.GPIO6,
-        Level::High,
+        PMosfet::power_to_level(&Power::Off),
         OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
     );
     // This signal should be 3.3V high when the Meeting Sign is operating correctly
