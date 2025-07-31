@@ -23,10 +23,10 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::{DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull};
+use esp_hal::gpio::{AnyPin, DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull};
 use esp_hal::i2c::master::I2c;
 use esp_hal::peripherals::LPWR;
-use esp_hal::rtc_cntl::sleep::{GpioWakeupSource, RtcioWakeupSource, WakeupLevel};
+use esp_hal::rtc_cntl::sleep::{RtcioWakeupSource, WakeupLevel};
 use esp_hal::rtc_cntl::Rtc;
 use esp_hal::time::Rate;
 use esp_hal::timer::systimer::SystemTimer;
@@ -60,7 +60,7 @@ async fn main(spawner: Spawner) {
     esp_println::logger::init_logger(LevelFilter::Info);
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
-    let mut peripherals = esp_hal::init(config);
+    let peripherals = esp_hal::init(config);
 
     let timer0 = SystemTimer::new(peripherals.SYSTIMER);
     esp_hal_embassy::init(timer0.alarm0);
@@ -69,20 +69,20 @@ async fn main(spawner: Spawner) {
 
     // NOTE: Since this is a P-Channel MOSFET, the MOSFET is "off" when the gate is high/floating.
     let usb_power_1 = Output::new(
-        peripherals.GPIO9,
+        peripherals.GPIO8,
         Level::High,
         OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
     );
     let usb_power_2 = Output::new(
-        peripherals.GPIO10,
+        peripherals.GPIO9,
         Level::High,
         OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
     );
 
-    let meeting_sign_power = Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default());
+    let meeting_sign_power = Output::new(peripherals.GPIO6, Level::Low, OutputConfig::default());
     // This signal should be 3.3V high when the Meeting Sign is operating correctly
     let meeting_sign_sense = Input::new(
-        peripherals.GPIO6,
+        peripherals.GPIO5,
         InputConfig::default().with_pull(Pull::Down),
     );
 
@@ -92,8 +92,8 @@ async fn main(spawner: Spawner) {
         esp_hal::i2c::master::Config::default().with_frequency(Rate::from_khz(400)),
     )
     .unwrap()
-    .with_sda(peripherals.GPIO0)
-    .with_scl(peripherals.GPIO1);
+    .with_sda(peripherals.GPIO20)
+    .with_scl(peripherals.GPIO21);
 
     let interface = I2CDisplayInterface::new(i2c);
     let mut display = Ssd1306::new(
@@ -109,11 +109,11 @@ async fn main(spawner: Spawner) {
     display.flush().unwrap();
 
     let usb_switch_led_a = Input::new(
-        peripherals.GPIO20,
+        peripherals.GPIO1,
         InputConfig::default().with_pull(Pull::Down),
     );
     let usb_switch_led_b = Input::new(
-        peripherals.GPIO21,
+        peripherals.GPIO0,
         InputConfig::default().with_pull(Pull::Down),
     );
     let usb_switch_state = USBSwitchState::from_leds(&usb_switch_led_a, &usb_switch_led_b);
@@ -155,8 +155,7 @@ async fn main(spawner: Spawner) {
         .spawn(writer(meeting_sign_uart, control_panel_state))
         .ok();
 
-    let mut gpio2 = peripherals.GPIO2;
-    let rotary_encoder_button = Input::new(gpio2, InputConfig::default());
+    let rotary_encoder_button = Input::new(peripherals.GPIO10, InputConfig::default());
     info!(
         "Rotary encoder button is {:?}!",
         rotary_encoder_button.level()
@@ -169,7 +168,7 @@ async fn main(spawner: Spawner) {
         .ok();
 
     let rotary_encoder_clk = Input::new(
-        peripherals.GPIO4,
+        peripherals.GPIO2,
         InputConfig::default().with_pull(Pull::Up),
     );
     let rotary_encoder_dt = Input::new(
@@ -188,15 +187,10 @@ async fn main(spawner: Spawner) {
         .spawn(monitor_meeting_sign_timer(control_panel_state))
         .ok();
 
-    let wakeup_pins: &mut [(&mut dyn esp_hal::gpio::RtcPinWithResistors, WakeupLevel)] = &mut [
-        // (&mut gpio2, WakeupLevel::High),
-    ];
-    let rtcio_wakeup_source = RtcioWakeupSource::new(wakeup_pins);
-
     let low_power_peripheral = peripherals.LPWR;
     spawner.must_spawn(sleep_timer(
         low_power_peripheral,
-        rtcio_wakeup_source,
+        peripherals.GPIO4.into(),
         control_panel_state,
     ));
 }
@@ -381,10 +375,15 @@ async fn writer(mut uart: Uart<'static, Async>, control_panel_state: &'static St
 #[embassy_executor::task]
 async fn sleep_timer(
     low_power_peripheral: LPWR<'static>,
-    rtcio_wakeup_source: RtcioWakeupSource<'static, 'static>,
+    mut wakeup_pin: AnyPin<'static>,
     control_panel_state: &'static StateMutex,
 ) {
     debug!("Starting sleep_timer task");
+
+    let wakeup_pins: &mut [(&mut dyn esp_hal::gpio::RtcPinWithResistors, WakeupLevel)] =
+        &mut [(&mut wakeup_pin, WakeupLevel::Low)];
+    let rtcio_wakeup_source = RtcioWakeupSource::new(wakeup_pins);
+
     let mut rtc = Rtc::new(low_power_peripheral);
     loop {
         match select(
@@ -399,7 +398,6 @@ async fn sleep_timer(
             }
             Either::Second(_) => {
                 log::warn!("Sleep timer expired, putting control panel to sleep.");
-                let x = GpioWakeupSource::new();
 
                 {
                     let mut cps = control_panel_state.lock().await;
