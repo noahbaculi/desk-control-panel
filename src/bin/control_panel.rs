@@ -48,7 +48,7 @@ static STATE_MUTEX: StaticCell<StateMutex> = StaticCell::new();
 static MEETING_SIGN_STATE: Signal<CriticalSectionRawMutex, MeetingSignState> = Signal::new();
 
 // This signal is used to delay the sleep timer task when inputs are received.
-static SLEEP_TIMER_EXTENSION_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+static SLEEP_TIMER_EXTENSION: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -207,14 +207,23 @@ async fn monitor_rotary_encoder_rotation(
         let direction = rotary_encoder.update().unwrap();
         match direction {
             Direction::Clockwise => {
-                let mut cps = control_panel_state.lock().await;
-                cps.rotary_encoder_rotate(&MEETING_SIGN_STATE, MovementDirection::Clockwise);
-                cps.display.flush().unwrap();
+                SLEEP_TIMER_EXTENSION.signal(());
+                {
+                    let mut cps = control_panel_state.lock().await;
+                    cps.rotary_encoder_rotate(&MEETING_SIGN_STATE, MovementDirection::Clockwise);
+                    cps.display.flush().unwrap();
+                }
             }
             Direction::CounterClockwise => {
-                let mut cps = control_panel_state.lock().await;
-                cps.rotary_encoder_rotate(&MEETING_SIGN_STATE, MovementDirection::CounterClockwise);
-                cps.display.flush().unwrap();
+                SLEEP_TIMER_EXTENSION.signal(());
+                {
+                    let mut cps = control_panel_state.lock().await;
+                    cps.rotary_encoder_rotate(
+                        &MEETING_SIGN_STATE,
+                        MovementDirection::CounterClockwise,
+                    );
+                    cps.display.flush().unwrap();
+                }
             }
             Direction::None => {}
         }
@@ -229,11 +238,9 @@ async fn monitor_rotary_encoder_button(
     control_panel_state: &'static StateMutex,
 ) {
     debug!("Starting monitor_rotary_encoder_button task");
-    let mut counter = 0;
     loop {
         button.wait_for_falling_edge().await;
-        counter += 1;
-        info!("Rotary encoder button pressed! Counter = {counter}");
+        SLEEP_TIMER_EXTENSION.signal(());
 
         {
             let mut cps = control_panel_state.lock().await;
@@ -255,6 +262,7 @@ async fn monitor_usb_switch_leds(
     debug!("Starting monitor_usb_switch_leds task");
     loop {
         select(led_a.wait_for_any_edge(), led_b.wait_for_any_edge()).await;
+        SLEEP_TIMER_EXTENSION.signal(());
 
         // Debounce the change
         Timer::after(Duration::from_millis(100)).await;
@@ -295,14 +303,13 @@ async fn monitor_meeting_sign_timer(control_panel_state: &'static StateMutex) {
             }
             MeetingSignState::Off => {
                 info!("monitor_meeting_sign_timer - Meeting sign is off, continuing to wait");
-                // TODO: kick off sleep timer here? Want the control panel to sleep when the
-                // Meeting Sign has been Off for 5 minutes. But any other input should reset the 5
-                // min timer.
+                SLEEP_TIMER_EXTENSION.signal(());
             }
             MeetingSignState::Disconnected => {
                 info!(
                     "monitor_meeting_sign_timer - Meeting sign is disconnected, continuing to wait"
                 );
+                SLEEP_TIMER_EXTENSION.signal(());
             }
         }
     }
@@ -387,25 +394,31 @@ async fn sleep_timer(
     let mut rtc = Rtc::new(low_power_peripheral);
     loop {
         match select(
-            SLEEP_TIMER_EXTENSION_SIGNAL.wait(),
-            // Timer::after(Duration::from_secs(60 * 5)), // 5 minutes
-            Timer::after(Duration::from_secs(10)),
+            SLEEP_TIMER_EXTENSION.wait(),
+            Timer::after(Duration::from_secs(60 * 5)), // 5 minutes
         )
         .await
         {
             Either::First(_) => {
-                log::warn!("Sleep timer extension signal received, resetting sleep timer.");
+                debug!("Sleep timer extension signal received, resetting sleep timer.");
             }
             Either::Second(_) => {
-                log::warn!("Sleep timer expired, putting control panel to sleep.");
+                debug!("Sleep timer expired, checking if can control panel to sleep.");
 
                 {
                     let mut cps = control_panel_state.lock().await;
+
+                    // Reset sleep timer if the Meeting Sign is active
+                    if cps.meeting_sign_completion.is_some() {
+                        debug!("  Meeting Sign is active, resetting sleep timer.");
+                        continue;
+                    }
+
+                    // Turn off display
                     cps.display.clear(BinaryColor::Off).unwrap();
                     cps.display.flush().unwrap();
                 }
 
-                // rtc.sleep_light(&[]);
                 rtc.sleep_deep(&[&rtcio_wakeup_source]);
             }
         };
