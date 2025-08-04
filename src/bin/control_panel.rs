@@ -302,7 +302,7 @@ async fn monitor_meeting_sign_timer(
 
                             Either::Second(()) => {
                                 let cps = control_panel_state.lock().await;
-                                write_uart(&mut uart, &cps.meeting_sign_end).await;
+                                write_uart(&mut uart, cps.meeting_sign_end.as_ref()).await;
                                 cps.meeting_sign_end.is_some()
                             }
                         };
@@ -324,7 +324,7 @@ async fn monitor_meeting_sign_timer(
     }
 }
 
-async fn write_uart(uart: &mut Uart<'static, Async>, meeting_sign_completion: &Option<Instant>) {
+async fn write_uart(uart: &mut Uart<'static, Async>, meeting_sign_completion: Option<&Instant>) {
     // Buffers sized appropriately for the MeetingInstruction payload
     let mut serialize_buf = [0u8; meeting_instruction::MAX_PAYLOAD_SIZE];
     let mut encode_buf = [0u8; meeting_instruction::MAX_ENCODED_SIZE];
