@@ -658,27 +658,6 @@ impl MeetingSignUI {
     );
     const BAR_ON_STYLE: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_fill(BinaryColor::On);
 
-    pub fn draw_disconnected<D: DrawTarget<Color = BinaryColor>>(
-        &self,
-        target: &mut D,
-    ) -> Result<(), D::Error> {
-        Self::FULL_PROGRESS_SHAPE
-            .draw_styled(&PrimitiveStyle::with_fill(BinaryColor::Off), target)?;
-
-        Self::TIME_REMAINING_BOUNDING_BOX
-            .draw_styled(&PrimitiveStyle::with_fill(BinaryColor::Off), target)?;
-
-        Text::with_text_style(
-            "X",
-            Self::TIME_REMAINIG_PT,
-            Self::TIME_REMAINING_STYLE,
-            Self::CENTER_ALIGNED,
-        )
-        .draw(target)?;
-
-        Ok(())
-    }
-
     pub fn draw_progress<D: DrawTarget<Color = BinaryColor>>(
         &self,
         target: &mut D,

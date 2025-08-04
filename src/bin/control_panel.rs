@@ -85,7 +85,7 @@ async fn main(spawner: Spawner) {
     );
 
     // This signal should be low when the Meeting Sign is operating correctly
-    let meeting_sign_sense = Input::new(
+    let _meeting_sign_sense = Input::new(
         peripherals.GPIO5,
         InputConfig::default().with_pull(Pull::Up),
     );
@@ -418,6 +418,7 @@ async fn sleep_timer(
                     cps.display.clear(BinaryColor::Off).unwrap();
                     cps.display.flush().unwrap();
                 }
+                info!("Going to sleep.");
 
                 rtc.sleep_deep(&[&rtcio_wakeup_source]);
             }
