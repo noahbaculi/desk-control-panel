@@ -376,8 +376,7 @@ async fn write_uart(uart: &mut Uart<'static, Async>, meeting_sign_completion: Op
     // Send encoded data + null delimiter
     uart.write_async(&encode_buf[..encoded_len]).await.unwrap();
     uart.write_async(&[COBS_DELIMITER]).await.unwrap();
-    // uart.flush_async().await.unwrap();
-    embedded_io_async::Write::flush(uart).await.unwrap();
+    uart.flush_async().await.unwrap();
 }
 
 #[embassy_executor::task]
