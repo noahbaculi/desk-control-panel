@@ -91,7 +91,7 @@ async fn main(spawner: Spawner) {
     let startup_instant = Instant::now();
 
     // WARN: This status pin needs to match the emergency hardcoded panic pin
-    let status_pin = Output::new(peripherals.GPIO1, Level::High, OutputConfig::default());
+    let status_pin = Output::new(peripherals.GPIO1, Level::Low, OutputConfig::default());
     // Store the pin globally for panic handler access
     unsafe {
         STATUS_PIN = Some(status_pin);
@@ -259,7 +259,7 @@ impl<'a> LEDs<'a> {
                 if let Some(ref mut pin) = STATUS_PIN {
                     pin.set_low();
                 } else {
-                    emergency_gpio1_low();
+                    emergency_gpio1_high();
                 }
             }
 
@@ -401,9 +401,9 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
         // Try to set the status pin low
         unsafe {
             if let Some(ref mut pin) = STATUS_PIN {
-                pin.set_low();
+                pin.set_high();
             } else {
-                emergency_gpio1_low();
+                emergency_gpio1_high();
             }
 
             set_leds_panic_pattern();
@@ -425,15 +425,15 @@ const GPIO_BASE_REG: u32 = 0x60004000;
 const GPIO_OUT_REG: *mut u32 = (GPIO_BASE_REG + 0x0004) as *mut u32; // GPIO output register
 const GPIO_ENABLE_REG: *mut u32 = (GPIO_BASE_REG + 0x0020) as *mut u32; // GPIO output enable register
 
-/// Emergency function to set GPIO pin low using direct register access
-unsafe fn emergency_gpio1_low() {
+/// Emergency function to set GPIO pin high using direct register access
+unsafe fn emergency_gpio1_high() {
     // Enable GPIO pin as output
     let enable_val = core::ptr::read_volatile(GPIO_ENABLE_REG);
     core::ptr::write_volatile(GPIO_ENABLE_REG, enable_val | (1 << STATUS_GPIO_PIN_NUMBER));
 
-    // Set GPIO pin low (clear the bit)
+    // Set GPIO pin high
     let out_val = core::ptr::read_volatile(GPIO_OUT_REG);
-    core::ptr::write_volatile(GPIO_OUT_REG, out_val & !(1 << STATUS_GPIO_PIN_NUMBER));
+    core::ptr::write_volatile(GPIO_OUT_REG, out_val | (1 << STATUS_GPIO_PIN_NUMBER));
 }
 
 /// Panic function to set panic pattern on LEDs via GPIO pins

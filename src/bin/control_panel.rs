@@ -83,10 +83,11 @@ async fn main(spawner: Spawner) {
         PMosfet::power_to_level(&Power::Off),
         OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
     );
-    // This signal should be 3.3V high when the Meeting Sign is operating correctly
+
+    // This signal should be low when the Meeting Sign is operating correctly
     let meeting_sign_sense = Input::new(
         peripherals.GPIO5,
-        InputConfig::default().with_pull(Pull::Down),
+        InputConfig::default().with_pull(Pull::Up),
     );
 
     // Initialize and configure I2C
