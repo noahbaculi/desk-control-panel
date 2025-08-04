@@ -7,8 +7,8 @@
 )]
 
 use desk_control_panel::control_panel::state::{
-    ControlPanelState, MeetingSignState, MovementDirection, PMosfet, Power, UISection,
-    UISelectionMode, USBSwitchState,
+    ControlPanelState, MovementDirection, PMosfet, Power, UISection, UISelectionMode,
+    USBSwitchState,
 };
 use desk_control_panel::meeting_duration::MeetingDuration;
 use desk_control_panel::meeting_instruction::{
@@ -45,7 +45,7 @@ type StateMutex = Mutex<CriticalSectionRawMutex, ControlPanelState>;
 static STATE_MUTEX: StaticCell<StateMutex> = StaticCell::new();
 
 // This signal is used to efficiently monitor the state of the Meeting Sign timer only when the Meeting Sign is active.
-static MEETING_SIGN_STATE: Signal<CriticalSectionRawMutex, MeetingSignState> = Signal::new();
+static MEETING_SIGN_STATE: Signal<CriticalSectionRawMutex, Power> = Signal::new();
 
 // This signal is used to delay the sleep timer task when inputs are received.
 static SLEEP_TIMER_EXTENSION: Signal<CriticalSectionRawMutex, ()> = Signal::new();
@@ -125,12 +125,11 @@ async fn main(spawner: Spawner) {
         usb_switch_state,
         usb_power_1,
         usb_power_2,
-        meeting_sign_sense,
         meeting_sign_power,
+        meeting_sign_end: None,
         ui_selection_mode: UISelectionMode::Menu,
         ui_section: UISection::MeetingSign,
         display,
-        meeting_sign_completion: None,
     }));
     {
         let mut cps = control_panel_state.lock().await;
@@ -288,28 +287,28 @@ async fn monitor_meeting_sign_timer(
     debug!("Starting monitor_meeting_sign_timer task");
     loop {
         match MEETING_SIGN_STATE.wait().await {
-            MeetingSignState::On => {
+            Power::On => {
                 let mut ui_update_ticker = Ticker::every(Duration::from_secs(30));
                 let mut uart_write_ticker = Ticker::every(UART_COMMUNICATION_INTERVAL);
                 loop {
-                    let meeting_sign_completion =
+                    let meeting_sign_is_active =
                         match select(ui_update_ticker.next(), uart_write_ticker.next()).await {
                             Either::First(()) => {
                                 let mut cps = control_panel_state.lock().await;
                                 cps.check_meeting_sign_timer(&MEETING_SIGN_STATE).unwrap();
                                 cps.display.flush().unwrap();
-                                cps.meeting_sign_completion
+                                cps.meeting_sign_end.is_some()
                             }
 
                             Either::Second(()) => {
                                 let cps = control_panel_state.lock().await;
-                                write_uart(&mut uart, &cps.meeting_sign_completion).await;
-                                cps.meeting_sign_completion
+                                write_uart(&mut uart, &cps.meeting_sign_end).await;
+                                cps.meeting_sign_end.is_some()
                             }
                         };
 
                     // Break out of the loop when the timer is no longer active
-                    if meeting_sign_completion.is_none() {
+                    if !meeting_sign_is_active {
                         info!(
                             "monitor_meeting_sign_timer - Timer completed, exiting monitoring loop"
                         );
@@ -317,14 +316,8 @@ async fn monitor_meeting_sign_timer(
                     }
                 }
             }
-            MeetingSignState::Off => {
+            Power::Off => {
                 info!("monitor_meeting_sign_timer - Meeting sign is off, continuing to wait");
-                SLEEP_TIMER_EXTENSION.signal(());
-            }
-            MeetingSignState::Disconnected => {
-                info!(
-                    "monitor_meeting_sign_timer - Meeting sign is disconnected, continuing to wait"
-                );
                 SLEEP_TIMER_EXTENSION.signal(());
             }
         }
@@ -416,7 +409,7 @@ async fn sleep_timer(
                     let mut cps = control_panel_state.lock().await;
 
                     // Reset sleep timer if the Meeting Sign is active
-                    if cps.meeting_sign_completion.is_some() {
+                    if cps.meeting_sign_end.is_some() {
                         debug!("  Meeting Sign is active, resetting sleep timer.");
                         continue;
                     }

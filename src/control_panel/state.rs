@@ -33,9 +33,8 @@ pub struct ControlPanelState {
     pub usb_switch_state: USBSwitchState,
     pub usb_power_1: Output<'static>,
     pub usb_power_2: Output<'static>,
-    pub meeting_sign_sense: Input<'static>,
     pub meeting_sign_power: Output<'static>,
-    pub meeting_sign_completion: Option<Instant>,
+    pub meeting_sign_end: Option<Instant>,
     pub ui_selection_mode: UISelectionMode,
     pub ui_section: UISection,
     pub display: DisplayType,
@@ -51,7 +50,7 @@ pub enum MovementDirection {
 impl ControlPanelState {
     pub fn rotary_encoder_rotate(
         &mut self,
-        meeting_sign_state: &Signal<CriticalSectionRawMutex, MeetingSignState>,
+        meeting_sign_state: &Signal<CriticalSectionRawMutex, Power>,
         direction: MovementDirection,
     ) {
         match self.ui_selection_mode {
@@ -150,15 +149,15 @@ impl ControlPanelState {
 
     fn process_meeting_sign_change(
         &mut self,
-        meeting_sign_state: &Signal<CriticalSectionRawMutex, MeetingSignState>,
+        meeting_sign_state: &Signal<CriticalSectionRawMutex, Power>,
         direction: MovementDirection,
     ) -> Result<(), <DisplayType as DrawTarget>::Error> {
         let now = Instant::now();
 
-        match (direction, self.meeting_sign_completion) {
+        match (direction, self.meeting_sign_end) {
             (MovementDirection::Clockwise, None) => {
                 PMosfet::turn_on(&mut self.meeting_sign_power);
-                self.meeting_sign_completion = Some(now + MEETING_SIGN_INTERVAL);
+                self.meeting_sign_end = Some(now + MEETING_SIGN_INTERVAL);
                 self.check_meeting_sign_timer(meeting_sign_state)?;
                 info!("Starting meeting sign timer from None");
             }
@@ -171,7 +170,7 @@ impl ControlPanelState {
                     return Ok(());
                 }
 
-                self.meeting_sign_completion = Some(proposed_end);
+                self.meeting_sign_end = Some(proposed_end);
                 self.check_meeting_sign_timer(meeting_sign_state)?;
                 info!("Meeting sign timer increased",);
             }
@@ -181,10 +180,10 @@ impl ControlPanelState {
             (MovementDirection::CounterClockwise, Some(end)) => {
                 if end - MEETING_SIGN_INTERVAL < now {
                     PMosfet::turn_off(&mut self.meeting_sign_power);
-                    self.meeting_sign_completion = None;
+                    self.meeting_sign_end = None;
                     info!("Meeting sign turned off and completion set to None");
                 } else {
-                    self.meeting_sign_completion = Some(end - MEETING_SIGN_INTERVAL);
+                    self.meeting_sign_end = Some(end - MEETING_SIGN_INTERVAL);
                     info!(
                         "Decreasing Meeting Sign timer by {}s.",
                         MEETING_SIGN_INTERVAL.as_secs()
@@ -198,22 +197,22 @@ impl ControlPanelState {
 
     pub fn check_meeting_sign_timer(
         &mut self,
-        meeting_sign_state: &Signal<CriticalSectionRawMutex, MeetingSignState>,
+        meeting_sign_state: &Signal<CriticalSectionRawMutex, Power>,
     ) -> Result<(), <DisplayType as DrawTarget>::Error> {
         let now = Instant::now();
         let mut remaining = None;
 
         match (
             PMosfet::get_power(&self.meeting_sign_power),
-            self.meeting_sign_completion,
+            self.meeting_sign_end,
         ) {
             (Power::Off, None) => {
-                meeting_sign_state.signal(MeetingSignState::Off);
+                meeting_sign_state.signal(Power::Off);
             }
             (Power::Off, Some(_)) => {
                 error!("Meeting Sign is not on, but completion is set to something");
                 // This should not happen, but if it does, we can reset the state
-                self.meeting_sign_completion = None;
+                self.meeting_sign_end = None;
             }
             (Power::On, None) => {
                 error!("Meeting Sign is on, but completion is None");
@@ -221,20 +220,10 @@ impl ControlPanelState {
                 PMosfet::turn_off(&mut self.meeting_sign_power);
             }
             (Power::On, Some(end)) => {
-                // if self.meeting_sign_sense.is_low() {
-                //     // If the sense is low, we should not be checking the meeting sign timer
-                //     warn!("Attempted to check Meeting Sign timer when Sense is Low");
-                //     PMosfet::turn_off(&mut self.meeting_sign_power);
-                //     self.meeting_sign_completion = None;
-                //     meeting_sign_state.signal(MeetingSignState::Disconnected);
-                //     MeetingSignUI.draw_disconnected(&mut self.display)?;
-                //     return Ok(());
-                // };
-
                 if end < now {
                     PMosfet::turn_off(&mut self.meeting_sign_power);
-                    self.meeting_sign_completion = None;
-                    meeting_sign_state.signal(MeetingSignState::Off);
+                    self.meeting_sign_end = None;
+                    meeting_sign_state.signal(Power::Off);
                     info!("Meeting Sign timer has completed");
                 } else {
                     let ratio =
@@ -242,7 +231,7 @@ impl ControlPanelState {
                             .unwrap();
                     remaining = Some(end - now);
 
-                    meeting_sign_state.signal(MeetingSignState::On);
+                    meeting_sign_state.signal(Power::On);
                     info!(
                         "Meeting Sign timer is running with ratio={ratio:?}, remaining={}s",
                         remaining.unwrap().as_secs()
@@ -450,13 +439,6 @@ impl Drawable for USBSwitchState {
 pub enum USBSwitchOutput {
     A,
     B,
-}
-
-#[derive(Debug)]
-pub enum MeetingSignState {
-    On,
-    Off,
-    Disconnected,
 }
 
 #[derive(Debug)]
