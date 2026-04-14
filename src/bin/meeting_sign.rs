@@ -309,7 +309,8 @@ async fn uart_reader(
                     trace!("Received encoded data: {encoded_data:?}");
 
                     match cobs::decode(encoded_data, &mut decode_buf) {
-                        Ok(decoded_len) => {
+                        Ok(report) => {
+                            let decoded_len = report.frame_size();
                             let decoded_data = &decode_buf[..decoded_len];
                             trace!("Decoded data: {decoded_data:?}");
                             match postcard::from_bytes::<MeetingSignInstruction>(decoded_data) {

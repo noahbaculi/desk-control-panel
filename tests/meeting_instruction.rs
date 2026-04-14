@@ -110,12 +110,14 @@ mod tests {
             );
 
             // Step 3: COBS decode
-            let decoded_len = cobs::decode(encoded_data, &mut decode_buf).map_err(|e| {
-                panic!(
-                    "Failed to COBS decode instruction {:?}: {:?}",
-                    orig_instruction, e
-                )
-            })?;
+            let decoded_len = cobs::decode(encoded_data, &mut decode_buf)
+                .map(|report| report.frame_size())
+                .map_err(|e| {
+                    panic!(
+                        "Failed to COBS decode instruction {:?}: {:?}",
+                        orig_instruction, e
+                    )
+                })?;
 
             assert_eq!(
                 decoded_len, serialized_len,
