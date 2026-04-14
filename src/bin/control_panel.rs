@@ -24,6 +24,7 @@ use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{AnyPin, DriveMode, Input, InputConfig, Output, OutputConfig, Pull};
+use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::i2c::master::I2c;
 use esp_hal::peripherals::LPWR;
 use esp_hal::rtc_cntl::sleep::{RtcioWakeupSource, WakeupLevel};
@@ -54,7 +55,7 @@ static SLEEP_TIMER_EXTENSION: Signal<CriticalSectionRawMutex, ()> = Signal::new(
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-#[esp_hal_embassy::main]
+#[esp_rtos::main]
 async fn main(spawner: Spawner) {
     // esp_println::logger::init_logger(LevelFilter::Debug);
     esp_println::logger::init_logger(LevelFilter::Info);
@@ -63,7 +64,8 @@ async fn main(spawner: Spawner) {
     let peripherals = esp_hal::init(config);
 
     let timer0 = SystemTimer::new(peripherals.SYSTIMER);
-    esp_hal_embassy::init(timer0.alarm0);
+    let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    esp_rtos::start(timer0.alarm0, sw_int.software_interrupt0);
 
     info!("Embassy initialized!");
 

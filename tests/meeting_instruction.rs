@@ -2,7 +2,7 @@
 #![no_main]
 
 #[cfg(test)]
-#[embedded_test::tests(executor = esp_hal_embassy::Executor::new())]
+#[embedded_test::tests(executor = esp_rtos::embassy::Executor::new())]
 mod tests {
     use defmt::{assert, info};
     use desk_control_panel::{
@@ -11,6 +11,7 @@ mod tests {
             MeetingSignInstruction, ProgressRatio, MAX_ENCODED_SIZE, MAX_PAYLOAD_SIZE,
         },
     };
+    use esp_hal::interrupt::software::SoftwareInterruptControl;
     use esp_hal::timer::systimer::SystemTimer;
     use rtt_target::rtt_init_defmt;
 
@@ -19,7 +20,8 @@ mod tests {
         let peripherals = esp_hal::init(esp_hal::Config::default());
 
         let timer0 = SystemTimer::new(peripherals.SYSTIMER);
-        esp_hal_embassy::init(timer0.alarm0);
+        let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+        esp_rtos::start(timer0.alarm0, sw_int.software_interrupt0);
 
         rtt_init_defmt!();
     }

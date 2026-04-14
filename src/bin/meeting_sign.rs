@@ -19,6 +19,7 @@ use esp_hal::rtc_cntl::Rtc;
 use esp_hal::{
     clock::CpuClock,
     gpio::{AnyPin, Level, Output, OutputConfig},
+    interrupt::software::SoftwareInterruptControl,
     timer::systimer::SystemTimer,
     uart::{Config, RxConfig, Uart},
     Async,
@@ -76,7 +77,7 @@ type MeetingSignStateSubscriber<'a> = Subscriber<
 >;
 static MEETING_SIGN_STATE: StaticCell<MeetingSignStatePubSubChannel> = StaticCell::new();
 
-#[esp_hal_embassy::main]
+#[esp_rtos::main]
 async fn main(spawner: Spawner) {
     esp_println::logger::init_logger(LevelFilter::Debug);
 
@@ -85,7 +86,8 @@ async fn main(spawner: Spawner) {
     let mut rtc = esp_hal::rtc_cntl::Rtc::new(peripherals.LPWR);
 
     let timer0 = SystemTimer::new(peripherals.SYSTIMER);
-    esp_hal_embassy::init(timer0.alarm0);
+    let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    esp_rtos::start(timer0.alarm0, sw_int.software_interrupt0);
     info!("Embassy initialized!");
 
     let startup_instant = Instant::now();
