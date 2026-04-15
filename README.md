@@ -1,5 +1,30 @@
 # Desk Control Panel
 
+![Desk Control Panel](./assets/front_module.jpeg)
+
+Under-desk control panel for KVM switching and USB peripheral management. An ESP32-C3 drives a 0.96" OLED screen and rotary encoder interface, controls USB power via P-channel MOSFETs, and communicates with a separate [meeting sign](https://github.com/noahbaculi/embedded-meeting-sign) device over UART. Firmware is Rust `no_std` using `esp-hal` and the [Embassy](https://embassy.dev/) async framework.
+
+[More photos and interactive CAD models](https://noahbaculi.com/projects/desk-control-panel)
+
+## Table of Contents
+
+- [Diagrams](#diagrams)
+- [Design Requirements](#design-requirements)
+  - [Peripherals](#peripherals)
+  - [Important Concepts](#important-concepts)
+- [Firmware Development](#firmware-development)
+- [Reference](#reference)
+
+## Diagrams
+
+### High Level Wiring Diagram
+
+![High Level Wiring Diagram](./assets/high_level_wiring_diagram.svg)
+
+### Back Module Distribution PCB Schematic
+
+![Back Module Distribution PCB Schematic](./assets/back_module_distribution_schematic.svg)
+
 ## Design Requirements
 
 A control panel for under my desk that allows me to control my KVM as well as other peripherals.
@@ -182,31 +207,15 @@ The Meeting Sign will be powered via one of the USB Power MOSFETs controlled by 
 
 - Make sure to connect the grounds of all the peripherals.
 
-## High Level Wiring Diagram
-
-![High Level Wiring Diagram](./assets/high_level_wiring_diagram.svg)
-
-## Back Module Distribution PCB Schematic
-
-![Back Module Distribution PCB Schematic](./assets/back_module_distribution_schematic.svg)
-
 ## Firmware Development
 
-This project is built in a `no_std` environment utilizing the `esp-hal` crate in conjunction with the [Embassy](https://embassy.dev/) framework.
+Two separate binaries (`control_panel` and `meeting_sign`) built in a `no_std` environment using `esp-hal` and the [Embassy](https://embassy.dev/) async framework. The control panel runs concurrent tasks for OLED rendering, rotary encoder input, USB hub state monitoring, MOSFET power switching, and a sleep timer. The two ESP32-C3 devices communicate over UART using COBS-encoded [`postcard`](https://docs.rs/postcard) serialization. Both binaries support deep sleep with RTC wakeup.
 
-<!-- - Rust via [rustup](https://rustup.rs/) -->
-
-<!-- - Install [ESP32 Rust tooling](https://docs.esp-rs.org/book/installation/index.html) -->
-
-<!---->
-
-<!-- ```shell -->
-
-<!-- cargo install espup -->
-
-<!-- espup install -->
-
-<!-- ``` -->
+Key dependencies:
+- `esp-hal` 1.0 + `esp-rtos` (Embassy integration)
+- `embedded-graphics` + `ssd1306` (OLED display)
+- `rotary-encoder-hal` (input)
+- `postcard` + `cobs` (serial protocol)
 
 ### Commands
 
