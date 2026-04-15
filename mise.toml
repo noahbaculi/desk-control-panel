@@ -1,2 +1,3 @@
 [tools]
 "cargo:espflash" = "latest"
+"cargo:probe-rs-tools" = "latest"

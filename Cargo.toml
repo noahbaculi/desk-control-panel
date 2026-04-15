@@ -65,7 +65,7 @@ static_cell = "2.1.1"
 thiserror = { version = "2.0.18", default-features = false }
 
 [dev-dependencies]
-embedded-test = { version = "0.7.1", default-features = false, features = [
+embedded-test = { version = "0.7.1", features = [
   "defmt",
   "embassy",
   "external-executor",
