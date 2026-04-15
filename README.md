@@ -219,6 +219,12 @@ Key dependencies:
 
 ### Commands
 
+Install dependencies
+
+```shell
+mise install
+```
+
 Flash binaries
 
 ```shell
