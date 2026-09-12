@@ -362,7 +362,7 @@ async fn write_uart(uart: &mut Uart<'static, Async>, meeting_sign_completion: Op
     debug!(
         "Instruction: {:?} | Raw data: {:?} | Encoded data: {:?}",
         payload,
-        &serialized,
+        serialized,
         &encode_buf[..encoded_len]
     );
 
