@@ -35,6 +35,8 @@ pub struct ControlPanelState {
     pub usb_power_2: Output<'static>,
     pub meeting_sign_power: Output<'static>,
     pub meeting_sign_end: Option<Instant>,
+    /// Deadline to force the USB power ports off, `None` when both are off
+    pub usb_power_off_at: Option<Instant>,
     pub ui_selection_mode: UISelectionMode,
     pub ui_section: UISection,
     pub display: DisplayType,
@@ -42,6 +44,7 @@ pub struct ControlPanelState {
 
 const MEETING_SIGN_INTERVAL: Duration = Duration::from_secs(60 * 5);
 const MEETING_SIGN_MAX_DURATION: Duration = Duration::from_secs(60 * 120);
+const USB_POWER_MAX_DURATION: Duration = Duration::from_secs(60 * 60 * 8);
 
 pub enum MovementDirection {
     Clockwise,
@@ -64,12 +67,14 @@ impl ControlPanelState {
             UISelectionMode::Selected => match self.ui_section {
                 UISection::USBPower1 => {
                     self.usb_power_1.toggle();
+                    self.refresh_usb_power_deadline();
                     USBPowerMosfet::One
                         .draw(&mut self.display, PMosfet::get_power(&self.usb_power_1))
                         .unwrap();
                 }
                 UISection::USBPower2 => {
                     self.usb_power_2.toggle();
+                    self.refresh_usb_power_deadline();
                     USBPowerMosfet::Two
                         .draw(&mut self.display, PMosfet::get_power(&self.usb_power_2))
                         .unwrap();
@@ -80,6 +85,29 @@ impl ControlPanelState {
                 }
             },
         };
+    }
+
+    /// Restarts the auto power off deadline while either USB power port is on
+    ///
+    /// A toggle of either port refreshes both, so a port can stay on for up to 16 hours.
+    fn refresh_usb_power_deadline(&mut self) {
+        let any_on = PMosfet::get_power(&self.usb_power_1) == Power::On
+            || PMosfet::get_power(&self.usb_power_2) == Power::On;
+        self.usb_power_off_at = any_on.then(|| Instant::now() + USB_POWER_MAX_DURATION);
+    }
+
+    /// Cuts power to both USB power ports and clears the auto power off deadline
+    pub fn turn_off_usb_power(&mut self) {
+        PMosfet::turn_off(&mut self.usb_power_1);
+        PMosfet::turn_off(&mut self.usb_power_2);
+        self.usb_power_off_at = None;
+
+        USBPowerMosfet::One
+            .draw(&mut self.display, Power::Off)
+            .unwrap();
+        USBPowerMosfet::Two
+            .draw(&mut self.display, Power::Off)
+            .unwrap();
     }
 
     pub fn rotary_encoder_press(&mut self) {

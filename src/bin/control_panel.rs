@@ -128,6 +128,7 @@ async fn main(spawner: Spawner) {
         usb_power_2,
         meeting_sign_power,
         meeting_sign_end: None,
+        usb_power_off_at: None,
         ui_selection_mode: UISelectionMode::Menu,
         ui_section: UISection::MeetingSign,
         display,
@@ -403,6 +404,13 @@ async fn sleep_timer(
                 {
                     let mut cps = control_panel_state.lock().await;
 
+                    // Cut USB power once it has been on past its deadline
+                    if cps.usb_power_off_at.is_some_and(|at| Instant::now() >= at) {
+                        info!("USB power has been on too long, turning it off.");
+                        cps.turn_off_usb_power();
+                        cps.display.flush().unwrap();
+                    }
+
                     // Reset sleep timer if the Meeting Sign is active
                     if cps.meeting_sign_end.is_some() {
                         debug!("  Meeting Sign is active, resetting sleep timer.");
@@ -412,6 +420,12 @@ async fn sleep_timer(
                     // Turn off display
                     cps.display.clear(BinaryColor::Off).unwrap();
                     cps.display.flush().unwrap();
+
+                    // Deep sleep releases the MOSFET gates, so stay awake
+                    if cps.usb_power_off_at.is_some() {
+                        debug!("  USB power is on, resetting sleep timer.");
+                        continue;
+                    }
                 }
                 info!("Going to sleep.");
 
