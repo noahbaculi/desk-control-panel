@@ -24,11 +24,10 @@ use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{AnyPin, DriveMode, Input, InputConfig, Output, OutputConfig, Pull};
+use esp_hal::gpio::{Event, WakeupConfig};
 use esp_hal::i2c::master::I2c;
-use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::peripherals::LPWR;
-use esp_hal::rtc_cntl::sleep::{RtcioWakeupSource, WakeupLevel};
-use esp_hal::rtc_cntl::Rtc;
+use esp_hal::rtc_cntl::sleep::{LowPower, RtcSleepConfig};
 use esp_hal::time::Rate;
 use esp_hal::timer::systimer::SystemTimer;
 use esp_hal::{
@@ -64,8 +63,7 @@ async fn main(spawner: Spawner) {
     let peripherals = esp_hal::init(config);
 
     let timer0 = SystemTimer::new(peripherals.SYSTIMER);
-    let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-    esp_rtos::start(timer0.alarm0, sw_int.software_interrupt0);
+    esp_rtos::start(timer0.alarm0, peripherals.FROM_CPU_INTR0);
 
     info!("Embassy initialized!");
 
@@ -140,13 +138,11 @@ async fn main(spawner: Spawner) {
         cps.display.flush().unwrap();
     }
 
-    spawner
-        .spawn(monitor_usb_switch_leds(
-            usb_switch_led_a,
-            usb_switch_led_b,
-            control_panel_state,
-        ))
-        .ok();
+    if let Ok(token) =
+        monitor_usb_switch_leds(usb_switch_led_a, usb_switch_led_b, control_panel_state)
+    {
+        spawner.spawn(token);
+    }
 
     let meeting_sign_uart_pin = peripherals.GPIO7;
     let meeting_sign_uart_config = Config::default().with_rx(
@@ -157,24 +153,18 @@ async fn main(spawner: Spawner) {
         .with_tx(meeting_sign_uart_pin)
         .into_async();
 
-    spawner
-        .spawn(monitor_meeting_sign_timer(
-            control_panel_state,
-            meeting_sign_uart,
-        ))
-        .ok();
+    if let Ok(token) = monitor_meeting_sign_timer(control_panel_state, meeting_sign_uart) {
+        spawner.spawn(token);
+    }
 
     let rotary_encoder_button = Input::new(peripherals.GPIO10, InputConfig::default());
     info!(
         "Rotary encoder button is {:?}!",
         rotary_encoder_button.level()
     );
-    spawner
-        .spawn(monitor_rotary_encoder_button(
-            rotary_encoder_button,
-            control_panel_state,
-        ))
-        .ok();
+    if let Ok(token) = monitor_rotary_encoder_button(rotary_encoder_button, control_panel_state) {
+        spawner.spawn(token);
+    }
 
     let rotary_encoder_clk = Input::new(
         peripherals.GPIO2,
@@ -184,20 +174,21 @@ async fn main(spawner: Spawner) {
         peripherals.GPIO3,
         InputConfig::default().with_pull(Pull::Up),
     );
-    spawner
-        .spawn(monitor_rotary_encoder_rotation(
-            rotary_encoder_clk,
-            rotary_encoder_dt,
-            control_panel_state,
-        ))
-        .ok();
+    if let Ok(token) =
+        monitor_rotary_encoder_rotation(rotary_encoder_clk, rotary_encoder_dt, control_panel_state)
+    {
+        spawner.spawn(token);
+    }
 
     let low_power_peripheral = peripherals.LPWR;
-    spawner.must_spawn(sleep_timer(
-        low_power_peripheral,
-        peripherals.GPIO4.into(),
-        control_panel_state,
-    ));
+    spawner.spawn(
+        sleep_timer(
+            low_power_peripheral,
+            peripherals.GPIO4.into(),
+            control_panel_state,
+        )
+        .unwrap(),
+    );
 }
 
 #[embassy_executor::task]
@@ -384,16 +375,18 @@ async fn write_uart(uart: &mut Uart<'static, Async>, meeting_sign_completion: Op
 #[embassy_executor::task]
 async fn sleep_timer(
     low_power_peripheral: LPWR<'static>,
-    mut wakeup_pin: AnyPin<'static>,
+    wakeup_pin: AnyPin<'static>,
     control_panel_state: &'static StateMutex,
 ) {
     debug!("Starting sleep_timer task");
 
-    let wakeup_pins: &mut [(&mut dyn esp_hal::gpio::RtcPinWithResistors, WakeupLevel)] =
-        &mut [(&mut wakeup_pin, WakeupLevel::Low)];
-    let rtcio_wakeup_source = RtcioWakeupSource::new(wakeup_pins);
+    let mut wakeup_pin = Input::new(wakeup_pin, InputConfig::default().with_pull(Pull::Up));
+    wakeup_pin
+        .apply_wakeup_config(&WakeupConfig::default().with_low_power_path(true))
+        .unwrap();
+    wakeup_pin.listen(Event::LowLevel);
 
-    let mut rtc = Rtc::new(low_power_peripheral);
+    let mut lpwr = LowPower::new(low_power_peripheral);
     loop {
         match select(
             SLEEP_TIMER_EXTENSION.wait(),
@@ -422,7 +415,7 @@ async fn sleep_timer(
                 }
                 info!("Going to sleep.");
 
-                rtc.sleep_deep(&[&rtcio_wakeup_source]);
+                lpwr.sleep_deep(RtcSleepConfig::deep());
             }
         };
     }

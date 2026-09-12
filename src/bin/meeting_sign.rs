@@ -15,11 +15,10 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::pubsub::{ImmediatePublisher, PubSubChannel, Subscriber};
 use embassy_time::{Duration, Instant, Timer};
-use esp_hal::rtc_cntl::Rtc;
+use esp_hal::rtc_cntl::sleep::{LowPower, RtcSleepConfig};
 use esp_hal::{
     clock::CpuClock,
     gpio::{AnyPin, Level, Output, OutputConfig},
-    interrupt::software::SoftwareInterruptControl,
     timer::systimer::SystemTimer,
     uart::{Config, RxConfig, Uart},
     Async,
@@ -33,6 +32,9 @@ const STATUS_GPIO_PIN_NUMBER: u32 = 1;
 
 const BUILT_IN_TIMER_DURATION: Duration = Duration::from_secs(60 * 90); // 90 minutes
 const BUILT_IN_TIMER_UPDATE_INTERVAL: Duration = Duration::from_secs(60 * 5);
+// Deep sleep needs an armed wakeup source, so arm one far enough out to never fire
+const SLEEP_FOREVER: esp_hal::time::Duration =
+    esp_hal::time::Duration::from_secs(100 * 365 * 24 * 3600);
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -83,11 +85,10 @@ async fn main(spawner: Spawner) {
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
-    let mut rtc = esp_hal::rtc_cntl::Rtc::new(peripherals.LPWR);
+    let mut lpwr = LowPower::new(peripherals.LPWR);
 
     let timer0 = SystemTimer::new(peripherals.SYSTIMER);
-    let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-    esp_rtos::start(timer0.alarm0, sw_int.software_interrupt0);
+    esp_rtos::start(timer0.alarm0, peripherals.FROM_CPU_INTR0);
     info!("Embassy initialized!");
 
     let startup_instant = Instant::now();
@@ -116,7 +117,7 @@ async fn main(spawner: Spawner) {
     // Initialize the LEDs to display the built-in timer
     leds.lock()
         .await
-        .display_builtin_timer(&startup_instant, &mut rtc);
+        .display_builtin_timer(&startup_instant, &mut lpwr);
 
     let meeting_sign_state = MEETING_SIGN_STATE.init(MeetingSignStatePubSubChannel::new());
 
@@ -143,10 +144,12 @@ async fn main(spawner: Spawner) {
         .with_rx(rx_pin)
         .into_async();
 
-    spawner.spawn(uart_reader(uart, state_publisher_1)).ok();
-    spawner
-        .spawn(uart_timeout_monitor(state_publisher_2, state_subscriber_1))
-        .ok();
+    if let Ok(token) = uart_reader(uart, state_publisher_1) {
+        spawner.spawn(token);
+    }
+    if let Ok(token) = uart_timeout_monitor(state_publisher_2, state_subscriber_1) {
+        spawner.spawn(token);
+    }
 
     let mut loop_timeout_duration = UART_COMMUNICATION_TIMEOUT;
     let mut last_progress_ratio = ProgressRatio(0);
@@ -168,7 +171,7 @@ async fn main(spawner: Spawner) {
 
                     leds.lock()
                         .await
-                        .display_builtin_timer(&startup_instant, &mut rtc);
+                        .display_builtin_timer(&startup_instant, &mut lpwr);
                 }
                 MeetingSignState::Uart(instruction) => {
                     info!("State changed to Uart.");
@@ -208,7 +211,7 @@ async fn main(spawner: Spawner) {
                 // ]);
                 leds.lock()
                     .await
-                    .display_builtin_timer(&startup_instant, &mut rtc);
+                    .display_builtin_timer(&startup_instant, &mut lpwr);
             }
         }
     }
@@ -248,7 +251,7 @@ impl<'a> LEDs<'a> {
         }
     }
 
-    pub fn display_builtin_timer(&mut self, startup_instant: &Instant, rtc: &mut Rtc) {
+    pub fn display_builtin_timer(&mut self, startup_instant: &Instant, lpwr: &mut LowPower) {
         let on_duration = startup_instant.elapsed();
         if on_duration >= BUILT_IN_TIMER_DURATION {
             // If the timer has expired, turn off all LEDs
@@ -265,7 +268,8 @@ impl<'a> LEDs<'a> {
                 }
             }
 
-            rtc.sleep_deep(&[]);
+            lpwr.set_wakeup_deadline(esp_hal::time::Instant::now() + SLEEP_FOREVER);
+            lpwr.sleep_deep(RtcSleepConfig::deep());
         } else {
             // Calculate the portion of time elapsed
             debug!(

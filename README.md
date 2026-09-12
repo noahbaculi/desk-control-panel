@@ -212,7 +212,7 @@ The Meeting Sign will be powered via one of the USB Power MOSFETs controlled by 
 Two separate binaries (`control_panel` and `meeting_sign`) built in a `no_std` environment using `esp-hal` and the [Embassy](https://embassy.dev/) async framework. The control panel runs concurrent tasks for OLED rendering, rotary encoder input, USB hub state monitoring, MOSFET power switching, and a sleep timer. The two ESP32-C3 devices communicate over UART using COBS-encoded [`postcard`](https://docs.rs/postcard) serialization. Both binaries support deep sleep with RTC wakeup.
 
 Key dependencies:
-- `esp-hal` 1.0 + `esp-rtos` (Embassy integration)
+- `esp-hal` 1.2 + `esp-rtos` (Embassy integration)
 - `embedded-graphics` + `ssd1306` (OLED display)
 - `rotary-encoder-hal` (input)
 - `postcard` + `cobs` (serial protocol)

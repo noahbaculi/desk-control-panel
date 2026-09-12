@@ -25,21 +25,21 @@ cobs = { version = "0.5.1", default-features = false, features = ["defmt"] }
 critical-section = "1.2.0"
 defmt = "1.0.1"
 defmt-rtt = "1.1.0"
-embassy-executor = { version = "0.9.1", features = ["defmt"] }
+embassy-executor = { version = "0.10.0", features = ["defmt"] }
 embassy-futures = { version = "0.1.2", features = ["defmt"] }
 embassy-sync = { version = "0.8.0", features = ["defmt"] }
 embassy-time = { version = "0.5.1", features = ["defmt"] }
 embedded-graphics = "0.8.2"
 embedded-io-async = { version = "0.7.0", features = ["defmt"] }
-esp-backtrace = { version = "0.18.1", features = [
+esp-backtrace = { version = "0.20.0", features = [
   "esp32c3",
   "panic-handler",
   "println",
 ] }
-esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32c3"] }
-esp-hal = { version = "1.0.0", features = ["defmt", "esp32c3", "unstable"] }
-esp-rtos = { version = "0.2.0", features = ["defmt", "esp32c3", "embassy"] }
-esp-println = { version = "0.16.1", features = [
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32c3"] }
+esp-hal = { version = "1.2.1", features = ["defmt", "esp32c3", "unstable"] }
+esp-rtos = { version = "0.4.0", features = ["defmt", "esp32c3", "embassy"] }
+esp-println = { version = "0.18.0", features = [
   "esp32c3",
   "defmt-espflash",
   "log-04",
@@ -61,9 +61,9 @@ static_cell = "2.1.1"
 thiserror = { version = "2.0.18", default-features = false }
 
 [dev-dependencies]
-embedded-test = { version = "0.7.1", features = [
+embedded-test = { version = "0.7.2", features = [
   "defmt",
-  "embassy",
+  "embassy-010",
   "external-executor",
 ] }
 
