@@ -40,6 +40,8 @@ pub struct ControlPanelState {
     pub ui_selection_mode: UISelectionMode,
     pub ui_section: UISection,
     pub display: DisplayType,
+    /// Whether the sleep timer has blanked the display while staying awake
+    pub display_blank: bool,
 }
 
 const MEETING_SIGN_INTERVAL: Duration = Duration::from_secs(60 * 5);
@@ -56,6 +58,9 @@ impl ControlPanelState {
         meeting_sign_state: &Signal<CriticalSectionRawMutex, Power>,
         direction: MovementDirection,
     ) {
+        if self.wake_display() {
+            return;
+        }
         match self.ui_selection_mode {
             UISelectionMode::Menu => {
                 match direction {
@@ -102,6 +107,9 @@ impl ControlPanelState {
         PMosfet::turn_off(&mut self.usb_power_2);
         self.usb_power_off_at = None;
 
+        if self.display_blank {
+            return;
+        }
         USBPowerMosfet::One
             .draw(&mut self.display, Power::Off)
             .unwrap();
@@ -110,7 +118,30 @@ impl ControlPanelState {
             .unwrap();
     }
 
+    /// Blanks the display until the next input wakes it
+    pub fn blank_display(&mut self) {
+        self.display.clear(BinaryColor::Off).unwrap();
+        self.display_blank = true;
+    }
+
+    /// Redraws the entire UI if the display is blank, returning whether it was
+    ///
+    /// Resets the selection like a wake from deep sleep so the waking input cannot act unseen.
+    fn wake_display(&mut self) -> bool {
+        if !self.display_blank {
+            return false;
+        }
+        self.display_blank = false;
+        self.ui_selection_mode = UISelectionMode::Menu;
+        self.ui_section = UISection::MeetingSign;
+        self.draw_entire_ui().unwrap();
+        true
+    }
+
     pub fn rotary_encoder_press(&mut self) {
+        if self.wake_display() {
+            return;
+        }
         match self.ui_selection_mode {
             UISelectionMode::Menu => {
                 self.ui_selection_mode = UISelectionMode::Selected;
@@ -172,7 +203,9 @@ impl ControlPanelState {
 
     pub fn update_usb_switch_state(&mut self, usb_switch_state: USBSwitchState) {
         self.usb_switch_state = usb_switch_state;
-        self.usb_switch_state.draw(&mut self.display).unwrap();
+        if !self.wake_display() {
+            self.usb_switch_state.draw(&mut self.display).unwrap();
+        }
     }
 
     fn process_meeting_sign_change(

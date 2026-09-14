@@ -132,6 +132,7 @@ async fn main(spawner: Spawner) {
         ui_selection_mode: UISelectionMode::Menu,
         ui_section: UISection::MeetingSign,
         display,
+        display_blank: false,
     }));
     {
         let mut cps = control_panel_state.lock().await;
@@ -418,7 +419,7 @@ async fn sleep_timer(
                     }
 
                     // Turn off display
-                    cps.display.clear(BinaryColor::Off).unwrap();
+                    cps.blank_display();
                     cps.display.flush().unwrap();
 
                     // Deep sleep releases the MOSFET gates, so stay awake
