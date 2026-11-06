@@ -9,7 +9,7 @@ Firmware for two ESP32-C3 boards, built as two binaries from one crate: `control
 
 ## Before committing
 
-CI (`.github/workflows/rust_ci.yml`) runs a release build, `fmt --check` and clippy with `-D warnings`. Run those same three before a commit; nothing else gates it.
+Run the jobs in `.github/workflows/rust_ci.yml` before a commit; nothing else gates it.
 
 ## Docs register
 
